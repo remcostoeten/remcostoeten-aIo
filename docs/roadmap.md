@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: Phases 0 and 1 complete; Phase 2 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
+Status: Phases 0, 1 and 2 complete; Phase 3 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
 
 The phase order follows AGENTS.md. The audit's larger package/feature list is not a required deliverable. Every phase defines a single purpose, preserves dependency direction, and records any behavior change separately.
 
@@ -81,6 +81,8 @@ Preserve Skriuw's model permission gate, credential-before-network ordering, req
 Source EOF handling, read timeout classification, cancellation-before-send and response cap behavior are characterized first. Any corrections require explicit behavior deltas and fixtures. No structured-output ladder, retries/key rotation, lifecycle process management, application prompts, or reference modifications.
 
 Exit: every introduced descriptor/adapter passes its local fixtures and conformance checks, including credentials/destination handling, malformed/truncated streams, usage, cancellation and timeout. The dependency graph matches actual manifests/features. Stop.
+
+**Met on 2026-09-06.** `crates/ai-providers` holds seven remote descriptors, the Gemini dialect, the Ollama generation adapter, the credential and model-authority ports, and the model listing contract. `docs/extraction-inventory-providers.md` records the symbol map, the seven behavior changes (P1–P7), the preserved source defects (H1–H7), and the test mapping. 60 tests pass against local fixture servers with no network and no key; `clippy -D warnings` is clean under all three feature combinations; the listing schema and its fixtures are committed. No reference repository was modified. Skriuw has not migrated — that is Phase 3.
 
 ## Phase 3: prove Skriuw consumes the extraction
 

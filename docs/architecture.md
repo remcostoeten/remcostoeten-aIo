@@ -35,11 +35,13 @@ The crate has no HTTP client, real provider dispatch, URLs, credential persisten
 
 Schema generation is development tooling. A target within ai-core is sufficient initially; a separate xtask crate is conditional, never part of the public dependency graph. No empty crates/packages are created.
 
-### 2.3 Provider layer, later
+### 2.3 Provider layer
 
-A separate ai-providers crate is justified by HTTP/protocol dependencies. It owns SSE/NDJSON provider parsing, transport bounds, endpoints, authorization, provider error decoding, catalog data, model listing and verification. Keep shared mechanics internal and extract them only as adapters demonstrate duplication.
+A separate ai-providers crate is justified by HTTP/protocol dependencies. It owns SSE/NDJSON provider parsing, transport bounds, endpoints, authorization, provider error decoding, model listing and verification. Keep shared mechanics internal and extract them only as adapters demonstrate duplication.
 
-Keep completion separate from administration. Syntax validation and model metadata are not substitutes for Skriuw's RemoteAiModelAuthority. See ADR 0003.
+Built in Phase 2: seven remote descriptors sharing one OpenAI-compatible path plus a Gemini dialect, an Ollama generation adapter, the credential and model-authority ports, and the model listing contract. Catalog data stayed in the application; so did consent, vault policy, and Ollama lifecycle. `docs/extraction-inventory-providers.md` records the seven behavior changes and the source defects preserved deliberately.
+
+Keep completion separate from administration. Syntax validation and model metadata are not substitutes for an application's model authority. See ADR 0003.
 
 ### 2.4 TypeScript and Vercel AI SDK
 

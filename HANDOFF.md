@@ -1,62 +1,73 @@
-# Session handoff: Phase 1 is closed
+# Session handoff: Phase 2 is closed
 
 Updated: 2026-09-06.
 Workspace: `/home/remcostoeten/dev/remcostoeten-aIo`.
 
 ## State
 
-**Phases 0 and 1 are COMPLETE. Phase 2 has not begun and is not authorized.**
+**Phases 0, 1 and 2 are COMPLETE. Phase 3 has not begun and is not authorized.**
 
-`crates/ai-core` exists and holds the whole Phase 1 deliverable: completion
-contracts and validators, cancellation/sink/channel ports, the completion trait,
-the service, the deterministic fake, and the D2 recorder port. Schema generation
-lives behind the `schema-tool` feature; six schemas and fourteen wire fixtures
-are committed under `specs/`.
+`crates/ai-core` holds the Phase 1 completion seam. `crates/ai-providers` holds
+the Phase 2 deliverable: seven remote descriptors sharing one OpenAI-compatible
+path plus the Gemini dialect, the Ollama generation adapter, the credential and
+model-authority ports, the model listing contract, and its schema tool. All
+tests run against local fixture servers in-crate; the two live tests are
+`#[ignore]`d.
 
-Both approved behavior changes landed as separate commits, deliberately:
-
-- `77b6146` extracts the source lifecycle verbatim, with the defects pinned by
-  `defect_*` tests.
-- the following commit applies the D1 hardening and renames those tests to
-  `hardened_*`, so the diff between them *is* the record of what changed.
-
-`docs/extraction-inventory.md` is the symbol-by-symbol and test-by-test map.
+`docs/extraction-inventory-providers.md` is the symbol map, the behavior-change
+record, and the test mapping. Read it before Phase 3.
 
 ## Verification at closure
 
-- `cargo test --all-features`: 74 passed, 0 failed.
-- `cargo clippy --all-targets --all-features -- -D warnings`: clean.
-- `cargo run -p ai-core --features schema-tool --bin ai-schema -- generate --check`: 6 schemas match.
+- `cargo test --all-features`: 135 passed, 0 failed, 2 ignored (live).
+- `cargo clippy --all-targets --all-features -- -D warnings`: clean, and also
+  clean for `--no-default-features` and each protocol feature alone.
+- Both schema tools pass `--check`: 6 core schemas, 1 provider schema.
 - `cargo fmt --all`: applied.
-- Runtime dependency graph: `schemars`, `serde`, `thiserror` direct; `serde_json`
-  only transitively through `schemars`. No HTTP client, OS credential store,
-  framework, async runtime, or Skriuw dependency.
+- Runtime graph for `ai-providers`: `ai-core`, `reqwest`, `schemars`, `serde`,
+  `serde_json`, `thiserror`. No OS credential store, framework, async runtime
+  facade, or Skriuw dependency.
 
-No reference repository was modified. `/home/remcostoeten/dev/{skriuw,dora,betalingen}`
-are untouched, which was a hard requirement of the phase, not an accident.
+`/home/remcostoeten/dev/{skriuw,dora,betalingen}` are untouched — verified by
+file mtime, not assumed.
+
+## What changed against the source, and what did not
+
+Seven behavior changes, all recorded as P1–P7 in the inventory: redirects
+refused rather than followed, user agent as a construction parameter, a generic
+credential vocabulary with application-owned copy, a cancellation recheck before
+sending, validated endpoint construction, a refused non-loopback Ollama
+endpoint, and no default model authority.
+
+Seven source defects preserved deliberately as H1–H7, including the inconsistent
+EOF handling between adapters, read timeouts surfacing as transport failures,
+and the response cap that can disguise truncation as completion. Fixing any of
+them is a separate approved change with its own fixtures.
 
 ## The next authorized boundary
 
-**Phase 2 requires an explicit instruction to begin.** Its scope is
-`docs/roadmap.md` "Phase 2": extract `crates/ai-providers` from the provider
-execution Skriuw already uses, with HTTP dependencies, local fixture servers,
-and `ADR 0003` as its design constraint. It is not permission to migrate Skriuw
-— that is Phase 3 — and not permission to change provider behavior: source EOF
-handling, read-timeout classification, cancellation-before-send and response
-caps must be characterized first, exactly as the lifecycle was here.
+**Phase 3 requires an explicit instruction to begin.** Its scope is
+`docs/roadmap.md` "Phase 3": integrate the extracted crates into Skriuw with
+preserved product behavior, under explicit migration authorization only.
 
-Before starting it, re-read the Skriuw provider crates for drift. Source facts
-in this repo were verified against revision
-`64827f5e81d097321715e789c9fcd795303c1595`.
+Skriuw keeps: `models.json` and the catalog types, `CatalogModelAuthority`,
+consent and vault policy (mapping its six credential errors onto the three
+refusals with its own copy), the Ollama lifecycle including
+`with_endpoint_override`'s status degradation, prompts, retention, and its
+command surface. It supplies its own user agent to preserve its current
+requests. Re-check the source revision for drift before starting; facts here
+were verified against `64827f5e81d097321715e789c9fcd795303c1595`.
 
 ## Known limitations, stated rather than hidden
 
-These are deliberate and documented in `docs/contracts.md` §3.3, not open bugs:
+Beyond the Phase 1 list in `docs/contracts.md` §3.3 — one terminal but no
+delivery guarantee, cooperative cancellation only, no watchdog — the provider
+layer adds:
 
-- No delivery guarantee to a closed channel. Commitment guarantees one terminal
-  and one send attempt, not receipt.
-- Cancellation cannot interrupt a provider that blocks or never returns.
-- Nothing survives process abort or an aborting panic.
-- `timeout_ms` is observed by the provider; there is no service-wide watchdog.
-- `shutdown` cancels current runs only; it does not close admission or join
-  workers.
+- No retries and no key rotation. A resolver called once cannot react to a later
+  429; rotation needs an execution owner the SDK does not have.
+- No structured output, no provider fallback, and never a switch from a local
+  endpoint to a remote one.
+- `sse_payload` is a line helper, not a general SSE decoder.
+- A stream that reaches the 4 MiB response cap is indistinguishable from one
+  that finished (H3), and no fixture covers it.
