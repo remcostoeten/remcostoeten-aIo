@@ -1,0 +1,6 @@
+{
+  "providerId": "deepseek",
+  "modelId": "deepseek-v4-flash",
+  "label": "deepseek-v4-flash",
+  "source": "fetched"
+}

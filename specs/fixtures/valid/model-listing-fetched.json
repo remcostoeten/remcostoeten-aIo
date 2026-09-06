@@ -1,0 +1,9 @@
+{
+  "providerId": "groq",
+  "modelId": "openai/gpt-oss-20b",
+  "label": "openai/gpt-oss-20b",
+  "contextWindowTokens": 131072,
+  "inputPriceMicrosPerMtok": null,
+  "outputPriceMicrosPerMtok": null,
+  "source": "fetched"
+}

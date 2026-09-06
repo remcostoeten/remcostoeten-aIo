@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "AiModelSource": {
+      "description": "Where a listing's information came from.\n\nProvenance, not trust: `Catalog` describes application-owned shipped data,\nwhich the SDK never produces. Adapters only ever emit `Fetched`.",
+      "oneOf": [
+        {
+          "const": "catalog",
+          "description": "Supplied by the application's own catalog.",
+          "type": "string"
+        },
+        {
+          "const": "fetched",
+          "description": "Reported by the provider for a specific credential.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://schemas.ai-sdk.local/0.1.0/model-listing.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One model a provider reports.\n\nPrices and context windows are absent rather than guessed. Absent means the\nlisting said nothing, never zero, and a consumer must not fabricate a\ndefault that would silently price or truncate a run.",
+  "properties": {
+    "contextWindowTokens": {
+      "description": "Reported context window, in tokens.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "inputPriceMicrosPerMtok": {
+      "description": "Reported prompt price, in micro-units per million tokens.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "label": {
+      "description": "Display text.",
+      "type": "string"
+    },
+    "modelId": {
+      "description": "Provider-scoped model identity.",
+      "type": "string"
+    },
+    "outputPriceMicrosPerMtok": {
+      "description": "Reported response price, in micro-units per million tokens.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "providerId": {
+      "description": "The registered provider this model belongs to.",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/AiModelSource",
+      "description": "Where this information came from."
+    }
+  },
+  "required": [
+    "providerId",
+    "modelId",
+    "label",
+    "source"
+  ],
+  "title": "AiModelListing",
+  "type": "object"
+}

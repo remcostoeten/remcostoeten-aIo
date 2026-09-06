@@ -1,0 +1,7 @@
+{
+  "providerId": "groq",
+  "modelId": "openai/gpt-oss-20b",
+  "label": "openai/gpt-oss-20b",
+  "source": "fetched",
+  "capabilities": ["streaming"]
+}

@@ -1,0 +1,6 @@
+{
+  "provider_id": "groq",
+  "model_id": "openai/gpt-oss-20b",
+  "label": "openai/gpt-oss-20b",
+  "source": "fetched"
+}

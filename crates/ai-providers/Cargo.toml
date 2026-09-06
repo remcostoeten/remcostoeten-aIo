@@ -1,0 +1,32 @@
+[package]
+name = "ai-providers"
+description = "HTTP provider adapters for the ai-core completion seam."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ai-core = { path = "../ai-core" }
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# The protocol features gate code, not dependencies: both adapters speak HTTP
+# through the same client, so disabling one does not remove `reqwest`. Claiming
+# otherwise would misdescribe the graph.
+[features]
+default = ["ollama", "remote"]
+ollama = []
+remote = []
+schema-tool = []
+
+[[bin]]
+name = "ai-provider-schema"
+path = "src/bin/ai-provider-schema.rs"
+required-features = ["schema-tool"]
+
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+{
+  "providerId": "gemini",
+  "modelId": "gemini-3.7-flash",
+  "label": "Gemini 3.7 Flash",
+  "contextWindowTokens": 1048576,
+  "inputPriceMicrosPerMtok": 75000,
+  "outputPriceMicrosPerMtok": 300000,
+  "source": "catalog"
+}
