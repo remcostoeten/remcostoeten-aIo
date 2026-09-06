@@ -43,6 +43,15 @@ fn scripted_service(
     )
 }
 
+fn assert_malformed(events: &[AiCompletionEvent]) {
+    match events.last() {
+        Some(AiCompletionEvent::ProviderError { error, .. }) => {
+            assert_eq!(error.category, AiProviderErrorCategory::MalformedResponse);
+        }
+        other => panic!("expected a malformed_response terminal, got {other:?}"),
+    }
+}
+
 #[test]
 fn streams_ordered_deltas_then_one_terminal() {
     let service = fake_service(FakeCompletionScript::success(["one ", "two"]));
@@ -356,7 +365,10 @@ fn an_invalid_request_is_never_recorded() {
 }
 
 #[test]
-fn defect_an_unknown_provider_bypasses_duplicate_detection() {
+fn hardened_an_unknown_provider_no_longer_bypasses_duplicate_detection() {
+    // Was defect_an_unknown_provider_bypasses_duplicate_detection. The source
+    // looked the provider up before checking for a duplicate id, so an active
+    // request could be handed a second, foreign terminal.
     let (service, control, _provider) = scripted_service(
         vec![Step::Await],
         AiCompletionTerminal::Done { usage: None },
@@ -372,23 +384,21 @@ fn defect_an_unknown_provider_bypasses_duplicate_detection() {
     unknown.provider_id = "ghost".into();
     assert_eq!(
         service.start("playground".into(), unknown, channel.clone()),
-        Ok(()),
-        "source looks up the provider before checking for a duplicate id"
+        Err(AiStartError::DuplicateRequest("request-1".into())),
+        "ids are reserved before provider lookup, so every path rejects duplicates"
     );
-
     assert!(
-        channel.events().iter().any(|event| matches!(
-            event,
-            AiCompletionEvent::ProviderError { request_id, .. } if request_id == "request-1"
-        )),
-        "so an active request id receives a second, foreign terminal"
+        channel.events().is_empty(),
+        "and the active run receives no foreign terminal"
     );
 
     control.release();
+    channel.wait_for_terminal();
 }
 
 #[test]
-fn defect_the_registry_entry_is_released_before_the_terminal_is_delivered() {
+fn hardened_a_reserved_id_cannot_be_reused_while_its_terminal_is_in_flight() {
+    // Was defect_the_registry_entry_is_released_before_the_terminal_is_delivered.
     let (provider, control) = ScriptedProvider::new(
         vec![Step::Await],
         AiCompletionTerminal::Done { usage: None },
@@ -406,26 +416,57 @@ fn defect_the_registry_entry_is_released_before_the_terminal_is_delivered() {
 
     assert!(
         !service.cancel("request-1"),
-        "the run is already untracked while its terminal is still in flight"
+        "a committed terminal cannot be rewritten by a later cancellation"
     );
-
-    let second = RecordingChannel::default();
     assert_eq!(
-        service.start("playground".into(), request("request-1"), second),
-        Ok(()),
-        "so the same id can be admitted again before the old terminal lands"
+        service.start(
+            "playground".into(),
+            request("request-1"),
+            RecordingChannel::default()
+        ),
+        Err(AiStartError::DuplicateRequest("request-1".into())),
+        "and the id stays reserved through the delivery attempt"
     );
 
     channel_control.release();
 }
 
 #[test]
-fn defect_the_sink_forwards_provider_output_without_validating_it() {
+fn hardened_a_reserved_id_is_released_once_delivery_has_been_attempted() {
     let (provider, control) = ScriptedProvider::new(
-        vec![
-            Step::ForeignDelta("someone-elses-request".into()),
-            Step::Delta(9, "out of order".into()),
-        ],
+        vec![Step::Await],
+        AiCompletionTerminal::Done { usage: None },
+    );
+    let registered: Arc<dyn AiComplete> = provider;
+    let service = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let channel = RecordingChannel::default();
+
+    service
+        .start("playground".into(), request("request-1"), channel.clone())
+        .expect("start");
+    control.await_entry();
+    control.release();
+    channel.wait_for_terminal();
+
+    let (second, second_control) =
+        ScriptedProvider::new(vec![], AiCompletionTerminal::Done { usage: None });
+    let registered: Arc<dyn AiComplete> = second;
+    let reuse = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let reused = RecordingChannel::default();
+    assert_eq!(
+        reuse.start("playground".into(), request("request-1"), reused.clone()),
+        Ok(()),
+        "reservation is not a permanent lease on the id"
+    );
+    second_control.await_entry();
+    reused.wait_for_terminal();
+}
+
+#[test]
+fn hardened_a_foreign_request_id_is_rejected_as_malformed_output() {
+    // Was half of defect_the_sink_forwards_provider_output_without_validating_it.
+    let (provider, control) = ScriptedProvider::new(
+        vec![Step::ForeignDelta("someone-elses-request".into())],
         AiCompletionTerminal::Done { usage: None },
     );
     let registered: Arc<dyn AiComplete> = provider;
@@ -439,25 +480,106 @@ fn defect_the_sink_forwards_provider_output_without_validating_it() {
 
     let events = channel.wait_for_terminal();
     assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AiCompletionEvent::Delta(delta) if delta.request_id == "someone-elses-request"
-        )),
-        "a foreign request id reaches the consumer unchallenged"
+        !events
+            .iter()
+            .any(|event| matches!(event, AiCompletionEvent::Delta(_))),
+        "the foreign delta never reaches the consumer"
     );
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AiCompletionEvent::Delta(delta) if delta.sequence == 9
-        )),
-        "so does a gap in the sequence"
-    );
+    assert_malformed(&events);
 }
 
 #[test]
-fn defect_a_provider_panic_strands_the_run_with_no_terminal() {
-    // The worker thread's panic message on stderr is expected output for this
-    // test; there is no service-level catch_unwind to absorb it yet.
+fn hardened_an_out_of_order_sequence_is_rejected_as_malformed_output() {
+    let (provider, control) = ScriptedProvider::new(
+        vec![Step::Delta(0, "first".into()), Step::Delta(9, "gap".into())],
+        AiCompletionTerminal::Done { usage: None },
+    );
+    let registered: Arc<dyn AiComplete> = provider;
+    let service = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let channel = RecordingChannel::default();
+
+    service
+        .start("playground".into(), request("request-1"), channel.clone())
+        .expect("start");
+    control.await_entry();
+
+    let events = channel.wait_for_terminal();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, AiCompletionEvent::Delta(_)))
+            .count(),
+        1,
+        "output already delivered stands; the gap stops the stream"
+    );
+    assert_malformed(&events);
+}
+
+#[test]
+fn hardened_an_oversized_delta_is_rejected_as_malformed_output() {
+    let (provider, control) = ScriptedProvider::new(
+        vec![Step::OversizedDelta],
+        AiCompletionTerminal::Done { usage: None },
+    );
+    let registered: Arc<dyn AiComplete> = provider;
+    let service = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let channel = RecordingChannel::default();
+
+    service
+        .start("playground".into(), request("request-1"), channel.clone())
+        .expect("start");
+    control.await_entry();
+
+    assert_malformed(&channel.wait_for_terminal());
+}
+
+#[test]
+fn hardened_exceeding_the_output_budget_is_rejected_as_malformed_output() {
+    let (provider, control) = ScriptedProvider::new(
+        vec![Step::Delta(0, "0123456789".into())],
+        AiCompletionTerminal::Done { usage: None },
+    );
+    let registered: Arc<dyn AiComplete> = provider;
+    let service = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let channel = RecordingChannel::default();
+    let mut tiny = request("request-1");
+    tiny.parameters.max_output_bytes = 4;
+
+    service
+        .start("playground".into(), tiny, channel.clone())
+        .expect("start");
+    control.await_entry();
+
+    assert_malformed(&channel.wait_for_terminal());
+}
+
+#[test]
+fn hardened_invalid_reported_usage_is_rejected_as_malformed_output() {
+    let (provider, control) = ScriptedProvider::new(
+        vec![],
+        AiCompletionTerminal::Done {
+            usage: Some(AiUsage {
+                input_tokens: u64::MAX,
+                output_tokens: 0,
+            }),
+        },
+    );
+    let registered: Arc<dyn AiComplete> = provider;
+    let service = AiCompletionService::new([("fake".to_owned(), registered)]);
+    let channel = RecordingChannel::default();
+
+    service
+        .start("playground".into(), request("request-1"), channel.clone())
+        .expect("start");
+    control.await_entry();
+
+    assert_malformed(&channel.wait_for_terminal());
+}
+
+#[test]
+fn hardened_a_provider_panic_becomes_an_internal_failure_terminal() {
+    // Was defect_a_provider_panic_strands_the_run_with_no_terminal. The panic
+    // message itself is deliberately discarded: it can contain prompt text.
     let (provider, control) = ScriptedProvider::new(
         vec![Step::Signal, Step::Panic],
         AiCompletionTerminal::Done { usage: None },
@@ -474,12 +596,29 @@ fn defect_a_provider_panic_strands_the_run_with_no_terminal() {
     control.await_entry();
     control.await_signal();
 
-    assert!(
-        service.cancel("request-1"),
-        "the registry entry outlives the panicking worker forever"
+    let events = channel.wait_for_terminal();
+    match events.last() {
+        Some(AiCompletionEvent::ProviderError { error, .. }) => {
+            assert_eq!(error.category, AiProviderErrorCategory::InternalFailure);
+            assert!(
+                !error.message.contains("scripted provider panic"),
+                "the panic payload must not be republished"
+            );
+        }
+        other => panic!("unexpected terminal: {other:?}"),
+    }
+
+    let (summary, _) = recorder.wait_for_one();
+    assert_eq!(
+        summary.status,
+        AiRunStatus::ProviderError {
+            category: AiProviderErrorCategory::InternalFailure
+        }
     );
-    assert!(channel.events().is_empty(), "and no terminal is ever sent");
-    assert!(recorder.calls().is_empty(), "and nothing is recorded");
+    assert!(
+        !service.cancel("request-1"),
+        "and the registry entry is cleaned up rather than stranded"
+    );
 }
 
 #[test]
