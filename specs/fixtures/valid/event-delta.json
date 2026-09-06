@@ -1,0 +1,6 @@
+{
+  "type": "delta",
+  "requestId": "request-1",
+  "sequence": 0,
+  "text": "hello"
+}

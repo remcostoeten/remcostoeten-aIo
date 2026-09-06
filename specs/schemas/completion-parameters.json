@@ -1,0 +1,54 @@
+{
+  "$id": "https://schemas.ai-sdk.local/0.1.0/completion-parameters.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Execution parameters for one completion.\n\n`retry_count` is accepted and validated but inert: no retry is performed.\nSampling parameters are thousandths, so 0 through 1000, and may be omitted\non the wire as well as sent explicitly as `null`.",
+  "properties": {
+    "maxOutputBytes": {
+      "description": "Response byte budget the provider must not exceed.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "retryCount": {
+      "description": "Accepted but inert. Present for wire compatibility only.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "temperatureMillis": {
+      "description": "Sampling temperature in thousandths.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "timeoutMs": {
+      "description": "Provider-observed timeout. This is not a service-wide deadline; see\n`docs/contracts.md` §3.2.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "topPMillis": {
+      "description": "Nucleus sampling threshold in thousandths.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "maxOutputBytes",
+    "timeoutMs",
+    "retryCount"
+  ],
+  "title": "AiCompletionParameters",
+  "type": "object"
+}

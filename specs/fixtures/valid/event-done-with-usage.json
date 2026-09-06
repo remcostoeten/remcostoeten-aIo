@@ -1,0 +1,8 @@
+{
+  "type": "done",
+  "requestId": "request-1",
+  "usage": {
+    "inputTokens": 12,
+    "outputTokens": 34
+  }
+}

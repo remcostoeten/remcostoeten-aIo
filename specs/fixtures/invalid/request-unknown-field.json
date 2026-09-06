@@ -1,0 +1,15 @@
+{
+  "requestId": "request-1",
+  "providerId": "fake",
+  "modelId": "model",
+  "systemPrompt": "",
+  "userPrompt": "",
+  "origin": "playground",
+  "parameters": {
+    "maxOutputBytes": 262144,
+    "timeoutMs": 60000,
+    "retryCount": 0,
+    "temperatureMillis": null,
+    "topPMillis": null
+  }
+}

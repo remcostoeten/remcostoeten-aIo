@@ -1,0 +1,29 @@
+{
+  "$id": "https://schemas.ai-sdk.local/0.1.0/completion-delta.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One chunk of streamed output.\n\nSequence numbers start at zero and increase by one. Empty text is accepted.",
+  "properties": {
+    "requestId": {
+      "description": "The request this delta belongs to.",
+      "type": "string"
+    },
+    "sequence": {
+      "description": "Zero-based position in the stream.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "text": {
+      "description": "Output text. May be empty.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "sequence",
+    "text"
+  ],
+  "title": "AiCompletionDelta",
+  "type": "object"
+}

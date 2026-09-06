@@ -1,0 +1,14 @@
+{
+  "requestId": "request-1",
+  "providerId": "fake",
+  "modelId": "model",
+  "systemPrompt": "",
+  "userPrompt": "",
+  "parameters": {
+    "maxOutputBytes": 1,
+    "timeoutMs": 1,
+    "retryCount": 2,
+    "temperatureMillis": 1000,
+    "topPMillis": 0
+  }
+}

@@ -1,0 +1,33 @@
+[package]
+name = "ai-core"
+description = "Provider-neutral AI completion contracts, service, and deterministic fake provider."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+# Schema generation is development tooling and never a runtime dependency of the
+# library. `serde_json` is therefore a dev-dependency, and the binary is gated on
+# the `schema-tool` feature so a consumer's dependency graph never acquires it.
+[features]
+schema-tool = ["dep:serde_json"]
+
+[dependencies.serde_json]
+workspace = true
+optional = true
+
+[[bin]]
+name = "ai-schema"
+path = "src/bin/ai-schema.rs"
+required-features = ["schema-tool"]
+
+[lints]
+workspace = true

@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "AiProviderErrorCategory": {
+      "description": "Semantic, provider-independent failure category.\n\nThis enum is closed on the wire. Timeout and cancellation are terminal\nvariants rather than error categories, and adding a value here is a\nbreaking change for every decoder.",
+      "oneOf": [
+        {
+          "const": "unavailable_provider",
+          "description": "No such provider is registered, or it cannot serve requests.",
+          "type": "string"
+        },
+        {
+          "const": "missing_credential",
+          "description": "No credential was available.",
+          "type": "string"
+        },
+        {
+          "const": "invalid_credential",
+          "description": "The credential was rejected.",
+          "type": "string"
+        },
+        {
+          "const": "quota_exhausted",
+          "description": "The account's quota is exhausted.",
+          "type": "string"
+        },
+        {
+          "const": "rate_limited",
+          "description": "The provider applied rate limiting.",
+          "type": "string"
+        },
+        {
+          "const": "rejected_request",
+          "description": "The provider rejected the request itself.",
+          "type": "string"
+        },
+        {
+          "const": "transport_failure",
+          "description": "The exchange failed below the protocol.",
+          "type": "string"
+        },
+        {
+          "const": "malformed_response",
+          "description": "The provider's output could not be interpreted, or broke the contract.",
+          "type": "string"
+        },
+        {
+          "const": "internal_failure",
+          "description": "A defect on this side of the boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "AiRecoveryAction": {
+      "description": "A hint about what a person could do next.\n\nThis is presentation advice. It is never permission for the SDK to retry,\nswitch model, or fall back on its own.",
+      "oneOf": [
+        {
+          "const": "configure_credential",
+          "description": "Supply or correct a credential.",
+          "type": "string"
+        },
+        {
+          "const": "retry",
+          "description": "Try again later.",
+          "type": "string"
+        },
+        {
+          "const": "choose_different_model",
+          "description": "Pick another model.",
+          "type": "string"
+        },
+        {
+          "const": "check_provider_status",
+          "description": "Check whether the provider is up.",
+          "type": "string"
+        },
+        {
+          "const": "reduce_request",
+          "description": "Send less input.",
+          "type": "string"
+        },
+        {
+          "const": "contact_provider",
+          "description": "Escalate to the provider.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Nothing actionable.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://schemas.ai-sdk.local/0.1.0/provider-error.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A typed provider failure.\n\nCarries no HTTP status, response body, or diagnostics bag: provider bodies\ncan contain prompts or secrets and stay internal to the adapter.",
+  "properties": {
+    "category": {
+      "$ref": "#/$defs/AiProviderErrorCategory",
+      "description": "Semantic category."
+    },
+    "message": {
+      "description": "Bounded, whitespace-normalized display text.",
+      "type": "string"
+    },
+    "providerId": {
+      "description": "The provider that failed.",
+      "type": "string"
+    },
+    "recoveryAction": {
+      "$ref": "#/$defs/AiRecoveryAction",
+      "description": "Presentation hint."
+    }
+  },
+  "required": [
+    "providerId",
+    "category",
+    "message",
+    "recoveryAction"
+  ],
+  "title": "AiProviderError",
+  "type": "object"
+}

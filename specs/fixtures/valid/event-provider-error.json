@@ -1,0 +1,10 @@
+{
+  "type": "provider_error",
+  "requestId": "request-1",
+  "error": {
+    "providerId": "fake",
+    "category": "transport_failure",
+    "message": "provider request failed",
+    "recoveryAction": "retry"
+  }
+}
