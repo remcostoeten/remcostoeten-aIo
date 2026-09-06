@@ -43,6 +43,8 @@ Built in Phase 2: seven remote descriptors sharing one OpenAI-compatible path pl
 
 Keep completion separate from administration. Syntax validation and model metadata are not substitutes for an application's model authority. See ADR 0003.
 
+Phase 3 put a real consumer on both crates: Skriuw's domain, completion, remote and local AI crates now sit on `ai-core` and `ai-providers`, with its catalogue, consent vocabulary, prompt library, run history and Ollama lifecycle unmoved. `docs/integration-skriuw.md` records what that cost — the two seams that changed shape, the contract-drift delta, and the distribution question the path dependencies leave open.
+
 ### 2.4 TypeScript and Vercel AI SDK
 
 Two later packages have a real dependency boundary:

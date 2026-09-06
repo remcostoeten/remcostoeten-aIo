@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: Phases 0, 1 and 2 complete; Phase 3 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
+Status: Phases 0 through 3 complete; Phase 4 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
 
 The phase order follows AGENTS.md. The audit's larger package/feature list is not a required deliverable. Every phase defines a single purpose, preserves dependency direction, and records any behavior change separately.
 
@@ -95,6 +95,8 @@ No simultaneous messages/error-taxonomy migration. Keep Ollama lifecycle in Skri
 Verification: Skriuw's current check script, contract drift checks, applicable AI tests and native fake-provider integration; real-device/provider checks remain explicitly opt-in. Test retained/redacted history and credential refusal. Preserve source test inventory rather than relying on an old hard-coded count.
 
 Exit: Skriuw builds and passes the relevant checks using extracted code, with only recorded D1/D2 changes and no SDK product logic. Stop; no Dora/Betalingen changes.
+
+**Met on 2026-09-07.** `docs/integration-skriuw.md` records the crate graph, what stayed in Skriuw, the two seams that changed shape (D2 recording, P3 credentials), the contract-drift delta, and the retained test inventory. Skriuw's own `./scripts/check.sh` is 12/12 green on branch `ai-sdk-phase-3-extraction`, commit `0b18371e`: 418 workspace tests, 74 desktop, 1530 renderer, contract drift clean, clippy clean. The adapters, credential port and completion service are gone from Skriuw; the catalogue, consent vocabulary, prompt library, run history and Ollama lifecycle stayed. Two caveats stated rather than hidden: the crates are consumed as paths into a sibling checkout, which needs a real release channel before it is more than a local proof, and the generated AI schemas gained doc-comment descriptions with two string enums rendering as `oneOf` consts — same accepted values, and the renderer's types are hand-written, so nothing downstream moved.
 
 ## Phase 4: TypeScript core and Vercel adapter
 
