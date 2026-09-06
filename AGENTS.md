@@ -21,7 +21,7 @@ These repositories are read-only references for this SDK:
 Never modify these repositories unless a future task explicitly requests a migration inside that repository.
 
 The architecture audit is available at:
-`./.dev-docs/knowledge/architecture-research-across-my-ai-apps.md`
+`./dev-docs/knowledge/architecture-research-across-my-ai-apps.md`
 
 Read it before making architectural decisions.
 
@@ -896,7 +896,7 @@ Initial repository:
 ai-sdk/
 ├── AGENTS.md
 ├── CLAUDE.md
-├── ai-sdk-architecture-research.md
+├── dev-docs/knowledge/architecture-research-across-my-ai-apps.md
 ├── README.md
 ├── docs/
 ├── specs/
@@ -934,7 +934,7 @@ Before any task:
 
 1. read this file completely
 2. read `CLAUDE.md` if present
-3. read `ai-sdk-architecture-research.md`
+3. read `dev-docs/knowledge/architecture-research-across-my-ai-apps.md`
 4. determine the current phase
 5. inspect relevant reference implementation code
 6. identify the smallest deliverable required
