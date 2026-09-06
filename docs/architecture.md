@@ -1,398 +1,235 @@
 # Architecture
 
-Status: Phase 0 specification. This document is normative for every later phase. Where it conflicts with the audit (`dev-docs/knowledge/architecture-research-across-my-ai-apps.md`), this document wins; where it conflicts with a reference repository's implementation, the reference implementation is evidence, not authority.
+Status: Phase 0 closed 2026-09-06. Review complete, decisions taken, verdict in §6. No implementation is authorized until Phase 1 is explicitly begun.
 
-Companion documents: `contracts.md` (contract shapes and invariants), `roadmap.md` (phases), `decisions/0001..0003` (scope, cross-language, providers).
+`AGENTS.md` governs scope. The audit at `dev-docs/knowledge/architecture-research-across-my-ai-apps.md` is evidence and a set of proposals; reference source wins when describing existing behavior. The requested root file `ai-sdk-architecture-research.md` is absent. This review read the complete available audit and all three existing ADRs.
 
----
+Companions: `contracts.md` distinguishes extraction from deferred design, `roadmap.md` defines phase gates, and ADRs 0001–0003 record corrected boundaries.
 
 ## 1. Central flow
 
-The audit's intended flow holds in all three reference applications, with one correction: Dora is the outlier that pushes application context (`SchemaContext`) *into* the provider layer (`apps/desktop/src-tauri/src/database/services/ai/mod.rs::AIRequest`, `prompts.rs::build` called from every adapter). Skriuw and Betalingen both render context into prompt text before the seam. The SDK adopts the Skriuw/Betalingen shape and Dora migrates to it.
-
 ```text
-┌───────────────────────────────────────────────────────────────────────┐
-│ APPLICATION                                                           │
-│   fetch product context (schema, note text, financial sources)        │
-│   build product prompts (SQL rules, writing prompts, Dutch assistant) │
-│   choose ModelRef (settings / env / per-call)                         │
-│   render context into Message[]                                       │
-└──────────────────────────────┬────────────────────────────────────────┘
-                               │ CompletionRequest (generic, serializable)
-┌──────────────────────────────▼────────────────────────────────────────┐
-│ RUNTIME (ai-core / packages/core)                                     │
-│   validate request · reject duplicate requestId · register cancel     │
-│   resolve provider by ModelRef.providerId · enforce deadline          │
-│   forward deltas with sequence numbers · first terminal wins          │
-│   convert Done→Cancelled if cancellation raced · record RunRecord     │
-└──────────────────────────────┬────────────────────────────────────────┘
-                               │ Provider.complete(request, cancel, sink)
-┌──────────────────────────────▼────────────────────────────────────────┐
-│ PROVIDER (ai-providers / packages/ai-sdk)                             │
-│   resolve credential via CredentialSource (after validation)          │
-│   shape request for the wire · stream · parse · bound · map errors    │
-└──────────────────────────────┬────────────────────────────────────────┘
-                               │ HTTP / local socket
-                            model
-                               │
-                               ▼
-        CompletionEvent: delta{seq}* → exactly one terminal
-        done{usage?,finishReason?} | cancelled | timeout | provider_error{error}
-                               │
-┌──────────────────────────────▼────────────────────────────────────────┐
-│ APPLICATION                                                           │
-│   accumulate text · parse product result · review · apply · persist   │
-└───────────────────────────────────────────────────────────────────────┘
+application builds product context and prompts
+  -> existing CompletionRequest + separate origin
+  -> CompletionService validates, selects registered provider, tracks cancellation
+  -> AiComplete sends deltas and returns one terminal
+  -> service attempts terminal delivery, then invokes app recorder
+  -> application reviews/interprets results and owns persistence
 ```
 
-Refinements over the naive diagram:
+This is Skriuw's current seam, with its actual limitations documented in `contracts.md` §3. It is not a claim that a thread can interrupt arbitrary blocking work or deliver into a closed channel.
 
-1. **Credential resolution happens inside the provider, after validation.** Skriuw's `RemoteAiProvider::complete` (`crates/skriuw-ai-remote/src/lib.rs`) resolves the credential only once the request is validated and the model is permitted, so a missing credential terminalizes before any socket opens. The SDK keeps this ordering.
-2. **The runtime, not the provider, owns the terminal-ordering guarantee.** Providers return one `Terminal`; the runtime publishes it. This is `skriuw_ai::AiCompletionService` (`crates/skriuw-ai/src/lib.rs`) unchanged.
-3. **Recording is post-terminal and off the delivery path.** The runtime calls `RunRecorder.record` after publishing the terminal; persistence is application-owned.
-4. **Non-streaming (`complete`) and structured (`generateObject`) operations are conveniences layered on the same stream.** There is one seam.
-
----
+Dora's SchemaContext and prompt building move to Dora's side of this boundary only in its approved migration. Betalingen already renders financial context before calling its provider. Neither application's prompts or context types enter the SDK.
 
 ## 2. Boundaries
 
-### 2.1 Application boundary
+### 2.1 Application
 
-Applications own everything with product meaning:
+Applications own prompts, context extraction, consent, credentials at rest, history retention, result parsing/application, model selection and recommendations, startup policy, UI, and commands/routes. Skriuw's built-in prompts and optional prompt retention are real behavior to preserve, not unused domain modules to copy wholesale.
 
-| Concern | Dora | Skriuw | Betalingen |
-| --- | --- | --- | --- |
-| Context fetch | `commands/ai.rs::build_schema_context`, `engine_for_connection` | `app/src/features/ai/editor-action-apply.ts::actionInputText` | `src/lib/ai/context.ts::buildScreenContext` |
-| Prompt text | `services/ai/prompts.rs` | `crates/skriuw-domain/src/prompt.rs` built-ins, workspace prompts | `context.ts::DATA_ASSISTANT_PROMPT` |
-| Result application | insert/run SQL in console | ProseMirror transactions, plan review (ADR-0036) | render Markdown |
-| Credential persistence | `storage/ai_keys.rs` + `security.rs` (AES-GCM) | `app/src-tauri/src/ai_credentials.rs` (keyring / session) | server env |
-| Consent / disclosure | none | `RemoteAiConsent`, `REMOTE_AI_DISCLOSURE_VERSION` | static UI text |
-| Usage persistence | `storage/ai_usage.rs` | `app/src-tauri/src/ai_history.rs` + SQLite migration `0018` | none |
-| IPC / HTTP surface | 34 Tauri commands | 22 Tauri commands | `POST /ai/chat` |
-| Recommended models | SQL-flavored picks | writing-flavored picks with use cases | env |
-| Enablement / gating | `settings.hideAi` | `settings.aiEnabled` opt-in gate | auth guard |
+### 2.2 Phase 1 Rust core
 
-The application is the only layer that knows a task name. `generateSql`, `rewriteNote`, `askAboutScreen` are application functions that *produce* a `CompletionRequest`.
+One production crate contains the existing completion DTOs and validators, cancellation/sink/channel ports, completion-only trait, service, deterministic fake, and the metadata-only recording port selected in D2. Preserve existing public names initially where that avoids migration work.
 
-### 2.2 AI core boundary
+The crate has no HTTP client, real provider dispatch, URLs, credential persistence, async runtime, Tauri/Specta, provider SDK, application prompt library, or product types. The `fake` provider name is an intentional exception for deterministic tests/playground behavior.
 
-The core (`crates/ai-core`, `packages/core`) owns:
+Schema generation is development tooling. A target within ai-core is sufficient initially; a separate xtask crate is conditional, never part of the public dependency graph. No empty crates/packages are created.
 
-- contracts and validation (`ModelRef`, `Message`, `CompletionRequest`, `CompletionEvent`, `ProviderError`, `Usage`, `ModelInfo`, `RunRecord`)
-- bounds (`MAX_*` constants, as `crates/skriuw-domain/src/ai.rs` lines 10–17)
-- the `Provider` contract and the `EventSink` / cancellation primitives
-- the `Runtime` (request registry, cancellation, deadline, first-terminal-wins, recording)
-- the deterministic fake provider
-- SSE and NDJSON codecs (decoders in both languages, an NDJSON encoder in TypeScript for HTTP servers)
-- ports: `CredentialSource`, `RunRecorder`, `Pricing`
-- the structured-output strategy ladder and output validation
-- byte/token estimation helpers
+### 2.3 Provider layer, later
 
-The core must not contain: a provider name, a URL, an HTTP client, prompt text, a storage engine, an async runtime as a hard dependency, Tauri, keyring, React, Hono, Node-only or Bun-only APIs, or any application type.
+A separate ai-providers crate is justified by HTTP/protocol dependencies. It owns SSE/NDJSON provider parsing, transport bounds, endpoints, authorization, provider error decoding, catalog data, model listing and verification. Keep shared mechanics internal and extract them only as adapters demonstrate duplication.
 
-### 2.3 Provider boundary
+Keep completion separate from administration. Syntax validation and model metadata are not substitutes for Skriuw's RemoteAiModelAuthority. See ADR 0003.
 
-Providers (`crates/ai-providers`, `packages/ai-sdk`) implement `Provider` and nothing else. See `decisions/0003-provider-boundary.md`. Summary:
+### 2.4 TypeScript and Vercel AI SDK
 
-- OpenAI-compatible providers are **data rows** (`ProviderDescriptor`) interpreted by one adapter. Evidence: Skriuw's `OpenAiCompatible` table (`crates/skriuw-ai-remote/src/provider.rs`, six rows) and Dora's `CompatSpec` (`services/ai/compat.rs`, seven consts) are the same idea written twice.
-- Anthropic, Gemini, and Ollama generation are custom adapters on a shared skeleton (stream reader, bounds, cancellation, deadline, status mapping).
-- Providers never see application types and never own credential storage.
+Two later packages have a real dependency boundary:
 
-### 2.4 Runtime boundary
+- `packages/core` (`@remcostoeten/ai-core`): our contracts, validators, ordered consumer, runtime/fake, and framework-free SDK-event NDJSON helpers as required by Betalingen.
+- `packages/ai-sdk` (`@remcostoeten/ai-vercel`): provider factories using our typed configuration/credential ports, internally creating Vercel model instances and mapping its events/errors.
 
-The runtime is the only entry point applications use for completion. Direct provider use is allowed only for administration calls (`verify`, `listModels`) so that recording, cancellation, and future routing stay uniform.
+No public signature accepts LanguageModel, UIMessage, TextStreamPart, APICallError, or an opaque unknown substitute. A public fromLanguageModel factory would couple consumers to the very API being isolated; it has been removed from the plan. Custom integrations implement our Provider contract in application code.
 
-Runtime responsibilities, all evidenced by `crates/skriuw-ai/src/lib.rs`:
+Core uses portable Web APIs and no node:*, bun:*, React, Hono, Tauri, Next.js, or provider imports. Environment lookup occurs in application/server integration; browsers have no portable process environment. Framework-free SDK-event NDJSON helpers are distinct from provider SSE parsing.
 
-| Responsibility | Skriuw evidence |
-| --- | --- |
-| Validate request, reject duplicate `requestId` | `AiCompletionService::start`, `AiStartError` |
-| Register a cancellation handle per request | `active: Mutex<HashMap<String, AiCancellation>>` |
-| Run provider off the caller | one named `std::thread` per request |
-| Forward deltas with sequence numbers | `CompletionServiceSink` |
-| Closed consumer cancels the provider | `a_closed_consumer_cancels_the_request` test |
-| Publish exactly one terminal; `Done` becomes `Cancelled` if cancellation raced | terminal publication in `start` |
-| Record after terminal | `AiRunRecorder::record` |
-| Idempotent `cancel(requestId) -> bool` | `AiCompletionService::cancel` |
-| `shutdown()` cancels all | `shutdown` |
+The synchronous Rust service uses native threads. Lack of tokio does not establish browser/WASM execution support. A future Rust server or browser adapter needs an explicit executor/platform decision.
 
-New in the SDK: per-request deadline enforcement in the runtime as a backstop (providers also check it in their read loops), the structured-output ladder, and the non-streaming `complete` / `generateObject` conveniences. Retries before the first delta are a runtime concern; ADR-0033 in Skriuw specifies them but no code implements them (audit §4.5). The SDK implements the rule "retry only before the first delta, only for retryable categories, at most `retryCount` times".
+### 2.5 Recording and credentials
 
-### 2.5 Model representation
+The existing service supplies AiRunPrompts to AiRunRecorder, and Skriuw's storage layer removes or retains them according to settings. D2 selects a metadata-only SDK summary with the request borrowed for the callback, so an application adapter — not the SDK — reconstructs that record and keeps retention where it already lives. This is an explicit compatibility approach proven by a Phase 1 harness, not a silent feature removal. Recording happens after a terminal send attempt; the callback is not a durable transaction or inherently nonblocking.
 
-Identity and description are separate.
+Credential resolution is not needed by the Phase 1 fake/service seam. Introduce its generic port with providers, keeping Skriuw's consent/vault types in Skriuw. Session and environment resolvers are not required extraction work. Credentials are runtime-only, never serialized configuration. Rust/TS secrecy lifecycle guarantees differ; see `contracts.md` §4.2.
 
-```text
-ModelRef   = { providerId, modelId }          required, validated, stable, the request key
-ModelInfo  = { model: ModelRef, label?, contextWindowTokens?, maxOutputTokens?,
-               capabilities: Map<Capability, CapabilitySupport>, locality, pricing?, source }
-```
+### 2.6 Models and structured output, deferred
 
-- A dotted single string (`google.gemini-2.5-flash`, Skriuw v1) is rejected: model ids contain `.`, `/`, `:` (`openai/gpt-oss-120b`, `z-ai/glm-5.3-flash`, `llama3.2:3b`).
-- Both desktop apps let users type arbitrary model ids (Dora `model-id-input.tsx`, Skriuw fetched listings), so the SDK routinely holds models it knows nothing about. `ModelInfo` is optional and carries a `source` (`catalog | listed | declared`) so consumers decide how much to trust it.
-- Provider ids: one canonical id per provider across all consumers. Decided: Skriuw's ids (`moonshot`, `zai`, `dashscope`) over Dora's (`kimi`, `glm`, `qwen`) because Skriuw's are the vendor names; Dora's stored settings get a migration map in roadmap Phase 8.
+Keep flat providerId/modelId in Phase 1. Nested ModelRef, messages, a richer taxonomy, capabilities, model info, maxOutputTokens, and response formats can be designed against the next real consumer in an approved contract gate.
 
-### 2.6 Capability representation
+Structured-output strategy, validation dialect, typed decoding and repair remain unresolved for a future phase; no automatic ladder ships. Application text/list parsing remains supported. No unused tools/vision/audio/embeddings/reasoning variants, content-part nesting, finish reason, stop/suffix controls, or router attempt list are reserved.
 
-`Capability` is a closed enum: `streaming`, `jsonMode`, `jsonSchema`, `tools`, `vision`, `audio`, `embeddings`, `reasoning`. Only `streaming`, `jsonMode`, `jsonSchema` have behavior in v1; the others are reserved values with no fields and no code paths (audit §8.2).
+### 2.7 Ollama and platform helpers
 
-`CapabilitySupport` is tri-state: `yes | no | unknown`. Sources, in precedence order: application declaration > shipped catalog > provider listing > provider-level default (every OpenAI-compatible endpoint streams) > `unknown`.
+Generation and lifecycle remain separate responsibilities and dependency sets. Application code composes runtime startup with generation. No optional provider-to-lifecycle edge is allowed.
 
-Rules:
+Skriuw's /api/generate must remain compatible for its initial migration. Dora's /api/chat is a later adapter capability; changing endpoint and prompt representation is behavior change.
 
-- Never infer a critical capability from a model-name substring. Dora's `is_openai_chat_model` and tier heuristics (`services/ai/models.rs`) stay in Dora as UI sugar.
-- `no` fails fast with `unsupported_capability` before any socket opens.
-- `unknown` tries and lets the provider error (typically `invalid_request`) inform the caller. A future router learns from that.
+LocalRuntime and progress types live in the lifecycle crate, not core. Tauri helpers are conditional on surviving duplication; no fixed commands or extra completion registry duplicating core ownership. Specta support is considered only when needed by Dora. React helpers are not scheduled.
 
-### 2.7 Credential boundary
+### 2.8 Routing
 
-The core defines the port; applications and optional crates own storage.
+No runtime routing, retry implementation, health store, fallback table, key-rotation decorator, or attempts field is required now. A later router can evolve versioned contracts; speculative fields are not needed to guarantee a future zero-change integration.
 
-```text
-CredentialSource.resolve(providerId) -> Credential | CredentialError
-Credential: opaque, zeroized on drop, redacted Debug/toString, never serializable
-CredentialError: missing | refused{reason} | storeUnavailable | invalid
-```
+Never silently fall back from local to remote inference. Never switch provider or model after user-visible output. Caller policy, model authority, and destination consent remain binding even before the first delta.
 
-Evidence: `crates/skriuw-domain/src/remote_ai.rs` (`AiCredential(Vec<u8>)` with redacted `Debug`, `AiCredentialSource`, `AiCredentialError`). Skriuw's consent variants become the generic `refused { reason }` so that consent versioning stays a Skriuw policy.
+## 3. Dependencies and verification
 
-Ships with the core (no platform dependency): environment-variable resolver, in-memory session resolver. Keyring-backed resolvers with Linux vault-state detection (`app/src-tauri/src/ai_credentials.rs::detect_vault_state`) and Dora's AES-GCM SQLite store are application implementations until two applications need the same one.
-
-Security rules carried from the audit (§11.2): credentials go in headers, never URLs (Dora `gemini.rs` line 149 is the counter-example); provider response bodies never reach the user-facing `message`; a bounded, redacted `body_excerpt` exists only in the opt-in diagnostics field; secrets never appear in any serializable configuration structure.
-
-Multi-key rotation (Dora `key_pool.rs`) is an optional `CredentialSource` decorator, restricted to `rate_limited` and `quota_exceeded`. Rotation on `invalid_credential` is dropped: an invalid key must surface, not be skipped.
-
-### 2.8 Structured-output boundary
-
-`ResponseFormat` is a request field: `text | json | jsonSchema { name, schema, strict }`. The `schema` payload is the one place the contract carries dynamic JSON, because a JSON Schema is by definition dynamic; it is validated as a JSON Schema at the trust boundary.
-
-Execution is a **strategy ladder** chosen by the runtime from model capabilities, per call:
-
-| Strategy | Requires | Mechanism |
+| Unit | Why separate | Dependencies/boundaries |
 | --- | --- | --- |
-| `native` | `jsonSchema: yes` | provider-native schema mode (OpenAI `json_schema`, Gemini `responseSchema`, Ollama `format`, Anthropic forced single tool) |
-| `jsonMode` | `jsonMode: yes \| unknown` | `json_object` + schema rendered into the system prompt |
-| `promptOnly` | always | schema in the prompt, no provider hint (Dora's Anthropic/Gemini/Ollama path today) |
+| ai-core, Phase 1 | Completion contract and service | Existing serde/schemars/thiserror needs; serde_json for schemas/tests as needed; std threads; no application crate dependency |
+| Schema tool, Phase 1 | Development generation/checking | Prefer a target in the existing crate; never shipped as a runtime dependency |
+| ai-providers, Phase 2 | HTTP and provider protocols | ai-core, HTTP/JSON libraries required by implemented adapters; feature isolation verified |
+| packages/core, Phase 4 | Portable contracts and consumption | Runtime validation dependency only as justified; no Vercel or framework dependency |
+| packages/ai-sdk, Phase 4 | Isolate Vercel provider dependencies | packages/core and selected AI SDK/provider packages, with tested version compatibility |
+| ai-ollama-runtime, Phase 6 | Process/filesystem/archive lifecycle | Core cancellation if useful; its own progress/error types; no completion logic |
+| ai-tauri, conditional Phase 7 | Tauri channel/platform glue | ai-core + Tauri; applications assemble providers |
 
-Post-processing is uniform and lives in core: strip code fences, parse, validate against the schema, emit `structured_output_invalid { issues }` on failure. One optional repair attempt re-asks the same model with the issues appended, and only when no delta has been delivered to the consumer. Structured calls therefore default to non-streaming.
+Do not state impossible dependency lists (the former roadmap required providers to use only core/reqwest while the architecture also required serde_json). Assess actual Cargo feature closure, not just manifest labels. Optional features do not excuse a forbidden responsibility.
 
-An application may force `promptOnly` and supply its own parser (Skriuw's bullet-list plans, `app/src/features/ai/action-plan.ts`, which are tuned for small local models). That choice stays in the application.
+Tests are phase-specific and offline. Phase 1 ports domain/service/fake tests, separates product prompt/catalog test fixtures, characterizes gaps, and compares existing wire fixtures. Phase 2 adds local provider fixture servers. Phase 4 adds TS structural/semantic validation and normalized provider-result parity. Rust schema generation alone does not prove cross-language validation parity.
 
-Invalid structured output is a typed failure. It never silently becomes text.
+## 4. Phase 0 critical review
 
-### 2.9 Streaming and cancellation model
+Findings are ordered by severity. "Original sections" identifies the reviewed document locations before this revision; corrected destinations are given so the historical findings remain traceable after restructuring. The audit remains unchanged, including recommendations this review rejects.
 
-Event contract: `delta{requestId, sequence, text}*` then exactly one terminal. Terminal kinds: `done{usage?, finishReason?}`, `cancelled`, `timeout`, `provider_error{error}`. This is Skriuw's `AiCompletionEvent` (`crates/skriuw-domain/src/ai.rs` line 227) plus an optional `finishReason` on `done`. Dora's `Final{content}` is dropped (clients accumulate); Betalingen's `done` maps to `done{usage: none}`.
+### F1 — Critical: Phase 1 was a redesign masquerading as extraction
 
-Cancellation:
+Original sections: roadmap Phase 1 Objective/Allowed/Tests/Exit and Phase 3 Allowed; contracts introductory status and §§2.1–2.7, 2.10–2.18; ADR 0001 Core; ADR 0002 Consequences.
 
-- **Rust**: a clonable `Cancellation` token (`Arc<AtomicBool>`, Skriuw `AiCancellation`) observed inside every read loop; a runtime registry keyed by validated `requestId`; idempotent `cancel(requestId) -> bool`.
-- **TypeScript**: `AbortSignal`. The runtime holds one `AbortController` per request and composes caller signal, timeout, and `cancel()`.
+The plan replaced systemPrompt/userPrompt, nested model identity, added origin to the provider request, renamed error states and recoveryAction, changed usage shape, doubled the temperature range, narrowed identifiers, and relaxed event decoding. It also added retries, structured output, codecs, administration, credentials, and tokio. Source `skriuw-domain/src/ai.rs` instead accepts empty prompts/deltas, uses temperature 0–1000, allows provider.local/v1, and rejects unknown event fields. Re-exporting changed types cannot preserve callers' struct literals or renderer JSON.
 
-Consumer close: a failed sink send cancels the provider. "Stop forwarding" is never treated as cancellation on its own; the provider is told to stop.
+Correction: extraction baseline in contracts §§1–2 and narrowed roadmap Phase 1. All generalizations require a later contract gate. Do not promise unchanged Skriuw behavior merely because renamed types compile.
 
-Deadline: `timeoutMs` per request is enforced in the read loop and as the transport timeout; the runtime enforces it as a backstop. Deadline expiry emits `timeout`, never `provider_error`.
+### F2 — Critical: exactly-one terminal and cancellation claims exceed the source
 
-Bounds: `maxOutputBytes` per request and a global response cap are enforced before delivery (Skriuw `rejects_stream_bytes_beyond_the_requested_output_limit`). Exceeding them is `malformed_response`.
+Original sections: architecture §§1, 2.4, 2.9; contracts §§2.17, 3 (invariants 3, 5, 9, 14); roadmap Phase 1 tests.
 
-Full invariants are listed in `contracts.md` §3.
+Source `skriuw-ai/src/lib.rs::start` looks up unknown providers before duplicate detection, removes the registry entry before sending the terminal, and has no panic guard. Concurrent reuse can receive an old terminal; a provider panic can leave an active entry and no terminal. Sink closure makes guaranteed delivery impossible. Start errors also omitted WorkerUnavailable and invented unknown_provider/shutting_down behavior.
 
-### 2.10 Rust architecture
+Correction: contracts §3 distinguishes terminal commitment, delivery attempt, successful receipt, and durable recording. Actual start/shutdown behavior is explicit. D1 requires a decision on narrowly scoped hardening rather than silently preserving or rewriting these defects.
 
-```text
-crates/ai-core
-  contracts, validation, bounds, Cancellation, EventSink, Provider trait,
-  Runtime, FakeProvider, SSE/NDJSON decoders, ports (CredentialSource,
-  RunRecorder, Pricing), structured-output ladder + validator, env/session
-  credential resolvers, token estimate
-  deps: serde, serde_json, schemars, thiserror; optional: tokio (async facade),
-        specta (Dora bindings), jsonschema (structured validation)
+### F3 — High: prompt-retention compatibility was silently lost
 
-crates/ai-providers
-  features: openai-compatible, anthropic, gemini, ollama
-  shared skeleton: blocking HTTP, bounded line reader, SSE/NDJSON dialects,
-  status→category mapper, usage extraction, verify, list_models
-  provider descriptors + priced catalog loaded from specs/data
-  deps: ai-core, reqwest (blocking, rustls), serde_json
+Original sections: architecture §§2.1, 2.2, 2.4; contracts §2.18; roadmap Phases 1 and 3; ADR 0001 Core.
 
-crates/ai-ollama-runtime        (Phase 6)
-  LocalRuntime port + OllamaRuntime: detect/install(SHA-256)/spawn/stop/status/
-  list/pull/remove/progress/shutdown
-  deps: ai-core (Cancellation, progress sink), reqwest, tar, zstd, flate2, sha2, tempfile
+Source `skriuw-ai/src/lib.rs::run_record` constructs prompts: Some(AiRunPrompts). `skriuw-sqlite/src/ai_history.rs::append_run` applies retain_prompts. The proposed record removed prompts and claimed zero behavior change. A wholesale ai_history extraction would conversely bring retention/filter/storage-oriented contracts into core.
 
-crates/ai-tauri                 (Phase 7, conditional)
-  ChannelSink, OperationRegistry, run_blocking, feature "specta"
-  deps: ai-core, tauri
+Correction: minimum accounting dependency inventory in contracts §2.8; D2 compares explicit compatibility approaches. Retention remains Skriuw-owned and must be demonstrated by an offline compatibility test before extraction exits.
 
-crates/xtask
-  JSON Schema generation + drift check + fixture replay (modelled on
-  /home/remcostoeten/dev/skriuw/crates/xtask/src/main.rs)
-```
+### F4 — High: timeout ownership and deadline scope were undefined
 
-The canonical provider trait is **synchronous and sink-based** (Skriuw's `AiComplete`). Reasons (audit §16.2): cancellation and byte accounting are enforced inside the read loop and proven by tests; both desktop apps already run AI off the main runtime; keeping `tokio` out of core keeps the core WASM-compatible; the code that would need porting (Dora's async adapters) is mostly superseded by Skriuw's. An async facade (`Runtime::stream -> impl Stream<Item = CompletionEvent>`) is offered behind a `tokio` feature, implemented with a channel fed by the sink; adapters do not change. This is final for v1. If a Rust HTTP server ever becomes a consumer, a native async adapter family may be added behind the same event contract via a new ADR; nothing is designed for it now.
+Original sections: architecture §§2.4, 2.9–2.10; contracts §§2.16–2.17, 3.6, 4.1; ADR 0003 §§2, 8.
 
-Rust type rules (from `AGENTS.md`): enums for bounded states; newtypes for validated identifiers; typed errors; `Result` for recoverable failures; no `unwrap`/`expect` in library code; `serde_json::Value` only at the JSON-Schema payload; `#[non_exhaustive]` on public enums that are intentionally extensible (`ContentPart`, `Capability`, `ErrorCategory`, `RecoveryAction`).
+The planned runtime backstop had no execution context/deadline parameter or interruption mechanism. Skriuw remote starts timing after credentials and maps read errors to TransportFailure; Ollama has request timeout but no explicit per-read deadline check. An atomic flag cannot interrupt a blocked read. The error table also allowed retry of an exhausted deadline.
 
-### 2.11 TypeScript architecture
+Correction: contracts §§3.2–3.3 documents cooperative baseline and excludes a watchdog from Phase 1. A future whole-request deadline must cover scheduling/resolution/retries explicitly and specify blocked-worker cleanup and delivery limits.
 
-```text
-packages/core          published as @remcostoeten/ai-core   ("@ai-sdk/*" is Vercel's; not used)
-  types mirroring specs/, zod schemas for trust boundaries, createCompletionConsumer
-  (from skriuw app/src/features/ai/completion-consumer.ts), decodeSse, decodeNdjson,
-  toNdjsonStream, Runtime (AbortController per request), createFakeProvider,
-  envCredentials, structured-output ladder + zod validation
-  deps: zod only. Runs in browser, Node, Bun, Workers. No node:* imports.
+### F5 — High: shared wire claims were false
 
-packages/ai-sdk        published as @remcostoeten/ai-vercel   (Vercel AI SDK adapter)
-  fromLanguageModel(model, meta): Provider
-  openaiCompatible(descriptor, credentials, fetch?): Provider
-  maps fullStream parts and APICallError into CompletionEvent / ProviderError
-  deps: core, ai, @ai-sdk/*   (regular dependencies of this package, never peers of core)
+Original sections: contracts §§1, 2.3, 2.9, 2.18, 5; ADR 0002 Wire conventions/Versioning/Golden fixtures; architecture §2.13.
 
-packages/react         (later, only if two React consumers share a hook)
-packages/tauri         (later, with crates/ai-tauri)
-```
+Unbounded u64 costs/timestamps are not exactly representable by TS numbers; intermediate price arithmetic may lose precision. Integers do not fix JSON ordering/escaping or delta segmentation. UTF-8 bounds are not JS string length. Closed enum additions are breaking even with non_exhaustive; mapping unknown values to internal discards meaning. Source TS types are hand-written, not Zod-inferred.
 
-Provider contract in TypeScript: `complete(request, signal): AsyncIterable<CompletionEvent>` that must end with exactly one terminal. Pull-based iteration matches the platform; the runtime wraps it with the same registry semantics as Rust.
+Correction: ADR 0002 specifies exact numeric arithmetic, byte validation, null behavior, semantic fixture comparisons, negative fixtures, and honest versioning. History numeric encoding is deferred with its shared DTO, not mislabeled portable.
 
-TypeScript type rules (from `AGENTS.md`): `type` not `interface`; no `any`; `unknown` narrowed at the boundary; discriminated unions with exhaustive handling; no `Record<string, unknown>` bags; no `extra`/`options`/`metadata` escape hatches; no leaked React, Hono, Tauri, Node, Bun, provider-SDK, or Vercel AI SDK types.
+### F6 — High: proposed contracts permit contradictory states
 
-### 2.12 Vercel AI SDK boundary
+Original sections: contracts §§2.13–2.14, 2.17–2.18; ADR 0003 §§2, 4.
 
-```text
-application
-  -> our contracts (CompletionRequest, CompletionEvent, ProviderError, ModelRef, Provider, Runtime)
-  -> packages/ai-sdk adapter
-  -> Vercel AI SDK (streamText / generateText / Output.object, provider packages)
-  -> provider
-```
+ProviderError allowed timeout/cancelled inside provider_error, arbitrary issues on unrelated failures, and a body diagnostics field. CompletionOutcome allowed success without value or failure with value, with usage duplicated at two levels. RunRecord allowed state:error without category and non-error with category. Parse results were optional-field bags; Pricing named both a record and a port.
 
-The Vercel AI SDK is an **adapter implementation detail**. It is a regular dependency of `packages/ai-sdk` only. Its types (`LanguageModel`, `StreamTextResult`, `UIMessage`, `TextStreamPart`, `APICallError`) never appear in a public signature; `fromLanguageModel` accepts one as an opaque input at the adapter boundary and that is the sole contact point. Evidence for this being the correct shape: Betalingen (`src/routes/ai.ts`) and Skriuw v1 both converted `fullStream` parts into their own event contracts and never exported AI SDK objects; the two consumers already sit on incompatible majors (`ai@7` vs `ai@6`).
+Correction: preserve the existing completion error enum initially; contracts §4 requires discriminated outcomes and category-specific issues, removes speculative attempts/duplicate states, separates legacy record compatibility from the future summary, and ADR 0003 uses typed internal parser signals.
 
-What the adapter reuses: provider packages with tested request shaping, SSE parsing, and error mapping; `abortSignal`; usage and `finishReason`; `Output.object` for native structured output; the `fetch` injection point that makes tests deterministic. What it does not use: the UI message stream protocol, `useChat`, the `"openai:gpt-4o"` registry syntax (collides with `ModelRef`), middleware, the gateway.
+### F7 — High: structured output had no implementable common contract
 
-A dependency-free `fetch`-based OpenAI-compatible adapter is permitted later only if a consumer must drop the AI SDK dependency (for example a browser bundle). No consumer needs it today.
+Original sections: architecture §2.8; contracts §§2.6, 2.17; ADR 0003 §10; roadmap Phases 1, 2, 4, 8.
 
-### 2.13 Shared Rust/TypeScript specification
+Automatic weaker strategies contradicted fail-fast capability rules and explicit fallback permission. schema appeared in both request and method arguments; strict was undefined; unconstrained T was not proven by a JSON schema. No dialect/ref/resource policy existed. Zod alone cannot validate arbitrary JSON Schema. Fence stripping and repair changed Dora behavior; all-wire-integers contradicted dynamic schema/result numbers.
 
-See `decisions/0002-cross-language-contracts.md`. Summary:
+Correction: defer execution; contracts §4.3 lists the single-schema, typed-decoder, bounded-validation, explicit-strategy and buffering requirements before approval. Existing consumers keep their parsers. Provider-native support needs fixtures at implementation time.
 
-```text
-specs/
-  schema/      JSON Schema per shared contract, generated from Rust (schemars), committed, drift-checked
-  enums/       error categories (+ default recovery, retryable-before-first-delta, fallback-eligible), capabilities
-  data/        providers.json (descriptors), models.json (priced catalog)
-  VERSION      spec semver
-fixtures/
-  streams/<provider>/<case>.sse + <case>.events.json
-  errors/<provider>/<case>.json
-  fake-scripts/*.json
-```
+### F8 — High: public Vercel escape hatch violated the stated boundary
 
-Rust is the schema generator (Skriuw already has `xtask` with check mode). TypeScript validates its types and zod schemas against the committed schemas and replays the same fixtures. Wire fields are camelCase; unions are tagged with `type` in snake_case; numbers are integers (millis, micro-dollars, bytes, tokens) so fixtures are byte-identical across languages.
+Original sections: architecture §§2.11–2.12; roadmap Phases 4–5; ADR 0002 framework discussion.
 
-### 2.14 Ollama generation boundary
+fromLanguageModel accepts a third-party instance even if called opaque. Either its signature leaks that type or broad unknown plus an assertion recreates the coupling. The audit's recommendation was internally inconsistent on this point.
 
-Ollama **generation** is a provider adapter in `crates/ai-providers` (feature `ollama`) and, in TypeScript, whatever Ollama provider the Vercel AI SDK adapter wraps. It speaks `/api/chat` (message-based, matching the SDK request), `/api/tags` for listing, `/api/version` for reachability. Dependencies: the HTTP client only.
+Correction: typed SDK-owned provider factories create Vercel models internally. Application custom adapters implement our Provider contract. No public arbitrary model input.
 
-```text
-messages -> Ollama HTTP API -> CompletionEvent stream
-```
+### F9 — High: security and migration policies changed without evidence of equivalence
 
-Error mapping specific to local runtimes: connection refused -> `local_runtime_unavailable` (recovery `startLocalRuntime`); 404 for an unpulled model -> `local_model_missing` (recovery `pullModel`).
+Original sections: architecture §§2.5–2.7, 2.14; contracts §2.15; ADR 0003 §§3, 5–7, 11; roadmap Phases 2, 3, 8.
 
-Endpoint policy (decided): the SDK default is loopback only. A non-loopback endpoint requires an explicit `allowRemoteEndpoint` opt-in at provider construction and is then classified `locality: remote { destination }` so privacy policies treat it as remote. Skriuw never opts in, so its current refusal (`endpoint_is_loopback`) is preserved without SDK-specific code; Dora opts in to keep its editable endpoint and gains the remote classification.
+Syntax-only model permission drops Skriuw's model authority. Arbitrary descriptor URLs plus a saved vendor key can redirect credentials. extraHeaders can carry secrets despite a comment. Regex-redacted body excerpts can expose prompts/keys. A resolver has no feedback to rotate on later HTTP errors. Dropping Dora's 401/403/5xx rotation and moving Skriuw from /api/generate to /api/chat are behavior changes.
 
-### 2.15 Ollama lifecycle boundary
+Correction: ADR 0003 retains model authority, constrains endpoint/credential binding, removes body/header escape hatches and implicit rotation, and preserves Skriuw's endpoint for its first migration. Dora policy changes require its later explicit decision.
 
-Ollama **lifecycle** is a separate crate (`crates/ai-ollama-runtime`, Phase 6):
+### F10 — Medium: core and packages acquired speculative responsibilities
+
+Original sections: architecture §§2.2, 2.6, 2.10–2.11, 2.15–2.17, 3; ADR 0001 Core/Consequences; roadmap Phases 1, 6, 9.
+
+Provider codecs, environment access, unused capabilities, a text-only ContentPart wrapper, future autocomplete controls, retries/router metadata and tokio had no Phase 1 consumer. The provider-to-lifecycle optional dependency contradicted "no process management." Verification/listing were bolted onto every completion implementation. A separate xtask was mandatory without testing whether a target sufficed.
+
+Correction: one production core crate; protocol mechanics in providers; portable event helpers in TS core only when needed; lifecycle composed by applications; admin traits introduced separately. No placeholder crates, async facade, or reserved features.
+
+### F11 — Medium: source audit was treated as authority when convenient
+
+Original sections: architecture opening status; ADR 0002 schema tooling; roadmap exit criteria.
+
+The opening paragraph explicitly overrode reference implementation, against AGENTS.md. Several audit recommendations were accepted as proven behavior: complete SSE parsing, exactly-once delivery, WASM support, a default retry mechanism, and an unchanged schema command. Even some audit statements were inaccurate (e.g. audit §15.1 says SDK result types do not cross a module boundary, but Betalingen's answerWithGroq returns streamText's inferred result).
+
+Correction: source-first status, corrected evidence and limitations throughout. Commands, dependency sets and test counts must be checked at extraction, not copied as immutable facts.
+
+### F12 — Medium: migration gates demanded unnecessary breaking changes
+
+Original sections: roadmap Phases 3, 5, 7–9; architecture §2.16.
+
+Phase 3 combined adopting crates with renderer wire changes and deleted old modules before proving all responsibilities moved. Phase 5 allowed preserving the application event shape but required new typed categories on that same wire. Phase 7 referenced Phase 8 as already underway; Phase 9 promised core never needs to change.
+
+Correction: roadmap separates extraction compatibility from later generalization, preserves app contracts by default, conditions deletions on replacement coverage, and removes circular/future-proofing promises. Real migration tests remain in the owning application.
+
+## 5. Decisions taken
+
+D1 and D2 were the two blocking extraction decisions. Both are now selected. The user asked for concrete phase closure and stated that autonomous decisions are welcome; that authorizes the selection below within the documentation task. It does not authorize implementation, and it does not extend to the later gates listed at the end of this section.
+
+### D1 — Phase 1 lifecycle scope: narrow hardening (selected)
+
+Selected: approve the narrow hardening specified in contracts §3.3 inside Phase 1, as a reviewable step that follows source characterization. It addresses duplicate-id admission on every path, terminal commitment and id reuse, provider-output validation, and panic cleanup, without adding HTTP, retries, a hard timeout scheduler, permanent shutdown, or worker joining.
+
+Rejected alternative: exact extraction with the defects merely documented. The defects are reachable from ordinary concurrent use — the same id can take both the unknown-provider and registered-provider paths, a removed registry entry suppresses both terminal and recording, and a provider panic strands an active entry — so an SDK whose selling point is explicit terminals should not ship them unchanged.
+
+This changes observable edge behavior. Phase 1 therefore keeps characterization and hardening as separately reviewable steps, tests races with barriers rather than sleeps, and continues to state the limitations in contracts §3.3 that hardening does not remove.
+
+### D2 — Recording compatibility: metadata summary with borrowed request (selected)
+
+Selected: the metadata-only `RunSummary` plus a request borrowed for the synchronous callback, specified in contracts §2.8, with a Skriuw-owned adapter reconstructing the existing history record.
 
 ```text
-detect · install (GitHub release + SHA-256) · verify · spawn · stop · status
-list models · pull models (progress) · remove models · shutdown
+RunRecorder.record(&self, summary: RunSummary, request: &CompletionRequest)
 ```
 
-Why separate from generation (not merely "both use Ollama"):
+Rejected alternative: temporarily preserving the existing prompt-bearing record inside the SDK. It minimizes call-site churn, but it makes the extracted contract carry prompts and structurally contradictory state/category combinations, which is the defect F3 and F6 identified.
 
-1. **Different dependency sets.** Lifecycle needs `tar`, `zstd`, `flate2`, `sha2`, `tempfile`, and process spawning. A Bun server or a browser build must never compile them.
-2. **Different ports.** Skriuw already models them as two traits: `AiComplete` (generation) and `LocalAiRuntime` (`crates/skriuw-domain/src/local_ai.rs` line 110). The Ollama runtime implements both today, which is an implementation coincidence, not a contract.
-3. **Different error types.** `LocalAiErrorCategory` (`InvalidRequest, Unavailable, DownloadFailed, ChecksumMismatch, InstallFailed, ProcessFailed, MalformedResponse, Cancelled, Unsupported`) describes install/pull operations; `ErrorCategory` describes completions. They must not be merged.
-4. **Different platform surface.** Install directories, `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` (Dora `ollama_installer/runtime.rs::apply_platform_env`), macOS quarantine removal, Windows policy. None of that belongs near a completion.
-5. **Different consumers.** All three apps generate; only the two desktop apps manage a runtime.
+Prompt retention stays Skriuw's storage-time decision; the SDK summary has no prompt field, storage, or retention policy, and need not be a shared serializable DTO in Phase 1. Contracts §2.8 fixes the status/state mapping and the invocation rules. Phase 1 proves this with a local compatibility harness covering retained and redacted history, unknown-provider synchronous completion, and start failure. No global prompt cache, no new persistence package, no disabled retention, and no reference-repository edits before Phase 3 is authorized.
 
-The `LocalRuntime` port lives in the runtime crate, not in `ai-core`, to keep process and filesystem vocabulary out of the core. The Ollama provider may depend on the runtime crate behind a feature for "auto-start on demand"; the reverse dependency is forbidden.
+### Later decisions (not Phase 1 blockers)
 
-### 2.16 Tauri boundary
+Before their respective gates: message-history/wire migration; model-instance identity and catalog provenance; safe history numeric encoding; provider EOF/read-timeout corrections; structured schema dialect/decoder and explicit strategy policy; Dora key-rotation/privacy behavior; optional Specta/Tauri package need. These do not justify reserving fields now.
 
-No Tauri plugin. No fixed SDK commands. Dora and Skriuw own their command surfaces (34 and 22 commands, different naming, different serialization casing, different IPC error types; audit §19).
+## 6. Verdict
 
-A future optional `crates/ai-tauri` may provide exactly three generic helpers, each duplicated in both apps today:
+**Phase 0 COMPLETE. APPROVED FOR PHASE 1.**
 
-| Helper | Skriuw | Dora |
-| --- | --- | --- |
-| `ChannelSink` (implements the runtime's event channel over `tauri::ipc::Channel<CompletionEvent>`) | `app/src-tauri/src/ai.rs::TauriCompletionChannel` | forwarder task in `commands/ai.rs::ai_complete_stream` |
-| `OperationRegistry` (id-keyed, duplicate rejection, idempotent cancel, `cancel_all`) | `app/src-tauri/src/ollama.rs::OperationRegistry` | three `DashMap<String, Arc<AtomicBool>>` in `lib.rs::AppState` |
-| `run_blocking` | `spawn_blocking` wrapper in `commands/ai.rs` | ad hoc `tokio::spawn` |
+The twelve findings in §4 are corrected across README, architecture, contracts, roadmap, and ADRs 0001–0003. The two blocking extraction decisions are selected in §5: narrow lifecycle hardening, and a metadata-only recorder summary with a borrowed request. Contracts §§2.8 and 3.3 are now definitive Phase 1 requirements, and roadmap Phase 1 carries a finite acceptance checklist.
 
-Plus an optional `specta` feature deriving `specta::Type` on core contracts so Dora keeps its generated `commands` object. The crate depends on `ai-core` and `tauri`, never on `ai-providers`; applications assemble providers. It is created only if Phase 7 finds the duplication still present after Phases 3 and 8 begin.
+Review passes checked phase scope, shared wire rules, terminal ownership, prompt/credential ownership, provider/lifecycle edges, and future-feature gates for contradictions. Source facts were re-verified against `skriuw-ai/src/lib.rs` and `skriuw-domain/src/ai_history.rs` at closure. No production code, package manifests, or reference repository changes exist; no runtime tests were run, because this phase produced documentation only.
 
-### 2.17 Future router boundary
-
-Routing is not built in Phases 0–8. Nothing routes across providers today (audit §20.1). The core must expose enough for a router to be added without breaking contracts:
-
-- `ErrorCategory` with per-category `retryableBeforeFirstDelta` and `fallbackEligible` flags in `specs/enums/error-categories.json`
-- `ModelInfo.capabilities` (tri-state) and `ModelInfo.locality`
-- `Usage`, `RunRecord.durationMs`, `ProviderError.retryAfterMs`
-- `CompletionOutcome.attempts` (a list with exactly one entry until a router exists; additive to extend)
-
-Hard rules the router must obey, fixed now: never switch provider or model after the first delta has been delivered; never fall back from a local provider to a remote one unless the application explicitly permits remote fallback; never route over provider crates directly (it receives `Provider` instances and `ModelInfo`).
-
-### 2.18 Testing and conformance strategy
-
-Normal tests never require paid provider access. Live-provider tests are opt-in and env-gated (`AI_LIVE_TESTS=1` plus keys) and never run in CI by default.
-
-| Suite | Content | Source pattern |
-| --- | --- | --- |
-| Fake provider | scripted tokens, delays, outcomes (`done`, `timeout`, `malformed`, `providerError{category}`), usage; identical script semantics in both languages | `skriuw_ai::FakeAiProvider`, `FakeCompletionScript` |
-| Runtime | ordered deltas, mid-stream abort, timeout before late token, malformed output, output bound, closed consumer cancels, duplicate id, recording with reported vs estimated usage, retry-before-first-delta only | the 16 tests in `crates/skriuw-ai/src/lib.rs` |
-| Provider conformance | one suite run against every adapter with a local fixture server (Rust `serve_once`) or injected `fetch` (TS): ordered deltas; exactly one terminal; cancellation before and during read; output bounds; every status code -> expected category; no socket without credential; credential never in URL; usage parsed; `[DONE]`, missing terminal, oversized event handled | `crates/skriuw-ai-remote/src/lib.rs` tests (23), Betalingen `src/lib/ai/ai.test.ts` |
-| Stream fixtures | `fixtures/streams/<provider>/<case>.sse` -> `events.json`, replayed by both languages | Skriuw inline bodies, Betalingen `providerResponse()` |
-| Error fixtures | status + body -> category + recovery, table-driven | `maps_provider_status_codes_onto_distinct_recoverable_states` |
-| Structured output | valid, fenced, invalid, repair path, `no` short-circuit, `promptOnly` forced | new |
-| Contract conformance | generated schemas equal committed `specs/`; TS types and zod validate all fixtures; golden JSON round-trips in both languages | Skriuw `xtask` check mode |
-| Local runtime | extraction, checksum, endpoint policy, pull stream bounds with local servers; `#[ignore]` device tests with a real Ollama | `crates/skriuw-ai-ollama/src/lib.rs` (12 + 4) |
-| Live smoke | one `maxOutputTokens: 1` call per adapter | opt-in only |
-
-Adding a provider without at least one stream fixture and one error fixture fails CI.
-
----
-
-## 3. Dependency direction
-
-```text
-specs/ + fixtures/   <== generated by crates/xtask from ai-core types; validated by packages/core tests
-
-              ai-core (Rust)                            packages/core (TS)
-             /     |      \                              /        \
-   ai-providers  ai-ollama-runtime  ai-tauri     packages/ai-sdk   packages/react, packages/tauri (later)
-        |              |              |                  |                 |
-   Skriuw shell / Dora shell (commands, context, prompts, storage)   Betalingen / Skriuw renderer / Dora studio
-```
-
-Allowed edges point inward to the core. `ai-tauri` -> `ai-core` only. `ai-ollama-runtime` -> `ai-core` only (for `Cancellation` and a progress sink). `ai-providers::ollama` -> `ai-ollama-runtime` optionally, behind a feature, never the reverse.
-
-### Forbidden dependency directions
-
-| From | Must never depend on |
-| --- | --- |
-| `ai-core` | `reqwest` or any HTTP client, `tauri`, `keyring`, `tokio` as a default dependency, any provider crate, any provider SDK, any application crate, any prompt text |
-| `packages/core` | `ai`, `@ai-sdk/*`, `react`, `@tauri-apps/api`, `hono`, `next`, `node:*`, `bun:*`, any provider SDK |
-| `ai-providers`, `packages/ai-sdk` | Dora schema/SQL types, Skriuw note/editor/consent types, Betalingen financial/screen types, credential storage, process management, application prompt text |
-| `ai-ollama-runtime` | `ai-providers`, completion logic |
-| `ai-tauri` | `ai-providers`, any application command name or product context |
-| any future router | provider crates (routes over `dyn Provider` + `ModelInfo` only) |
-| any SDK unit | application prompt text, application context types, task names |
-| applications | provider adapters directly for completion (must go through the runtime); direct use allowed only for `verify` and `listModels` |
-| public contracts | Vercel AI SDK types, React types, Hono types, Tauri types, Node/Bun types, provider SDK types |
-
-A change that compiles in both languages but alters the serialized meaning of a shared contract is a contract change and requires a spec version bump (ADR 0002).
+Readiness is not authorization. Phase 1 begins only on an explicit instruction to begin it, and stops at its own exit criteria.

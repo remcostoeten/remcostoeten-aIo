@@ -1,93 +1,55 @@
 # ADR 0001: SDK scope
 
-Status: accepted (Phase 0, 2026-09-06)
+Status: accepted at Phase 0 closure, 2026-09-06. The blocking decisions formerly cited here are settled in `architecture.md` §5; Phase 1 now waits only on an explicit instruction to begin. This revision supersedes the original broader "shipped first" list.
 
 ## Context
 
-Three applications carry independent AI implementations (audit: `dev-docs/knowledge/architecture-research-across-my-ai-apps.md`). The same mechanisms are written repeatedly: OpenAI-compatible chat clients twice in Rust and once via the Vercel AI SDK; Gemini twice with a security-relevant difference; Ollama install/spawn three times; SSE/NDJSON decoding in every repo; three incompatible streaming event shapes; three error styles of which only Skriuw's is machine-readable. Meanwhile everything that gives these features product meaning (schema context, note extraction, financial source allowlists, prompts, consent, key storage, usage tables, UI) is different in each application and correctly so.
-
-The question is where the line goes.
+The audit documents duplicated completion mechanics in Skriuw, Dora, and Betalingen. Its recommendations also include capabilities, wrappers, prompts, and routing that current execution does not require. Extraction and redesign must be separate deliverables.
 
 ## Decision
 
-The SDK owns **AI execution**. Applications own **product meaning**. The line is the `CompletionRequest`: everything needed to turn messages into events is SDK; everything needed to produce messages or interpret events is application.
+The SDK owns AI execution. Applications own product meaning.
 
-### Core (shipped first; `crates/ai-core`, `packages/core`)
+### Phase 1 core
 
-- Contracts: `ModelRef`, `ModelInfo`, `Capability`/`CapabilitySupport`, `Role`/`ContentPart`/`Message`, `CompletionRequest`/`CompletionParameters`/`ResponseFormat`, `CompletionDelta`/`CompletionEvent`/`CompletionTerminal`, `Usage`/`UsageSource`/`FinishReason`, `ProviderError`/`ErrorCategory`/`RecoveryAction`, `CredentialSource`/`Credential`/`CredentialError`, `Provider`, `Runtime`/`CompletionOutcome`, `RunRecord`/`RunRecorder`/`Pricing`
-- Validation and bounds for all of the above
-- The runtime: request registry, cancellation, deadline, first-terminal-wins, retry-before-first-delta, recording hook
-- Structured-output strategy selection and output validation
-- Deterministic fake provider with scripted outcomes
-- SSE and NDJSON decoders; NDJSON encoder (TypeScript)
-- Environment-variable and in-memory session credential resolvers
-- Byte/token estimation and cost computation helpers
-- The shared specification (`specs/`, `fixtures/`) generated from the Rust core
+One production crate, `crates/ai-core`, contains the provider-neutral portion of Skriuw's `ai.rs` and `skriuw-ai`: request/event/error contracts, existing validation and bounds, cancellation, sink and channel ports, the synchronous completion trait, completion service, and deterministic fake provider. Recording enters core only as the metadata-only summary port selected in `architecture.md` §5 and specified in `contracts.md` §2.8, plus the token estimation and cost arithmetic it needs. The legacy prompt-bearing history record does not.
 
-### Providers (`crates/ai-providers`, `packages/ai-sdk`)
+Preserve existing serialized names, accepted identifier grammar, empty-prompt behavior, sampling bounds, error categories, explicit terminals, and inactive `retryCount`. Keep `origin` as a separate service argument. Do not require `id`, `verify`, `listModels`, or `modelInfo` on the completion trait.
 
-- One shared skeleton per language (HTTP, stream reader, bounds, cancellation, deadline, status mapping, usage extraction)
-- Descriptor-driven OpenAI-compatible adapter fed by `specs/data/providers.json`
-- Custom adapters: Anthropic, Gemini, Ollama generation
-- `verify` and `listModels` per adapter
-- Priced model catalog data and merge logic
-- In TypeScript, the Vercel AI SDK as the internal implementation of the adapter package
+Use modules within this crate. Schema generation/checking may be a development-only target of the same crate; create a separate `xtask` crate only if a concrete build/dependency need emerges. It is not an SDK dependency.
 
-### Platform integrations (optional, later, each behind its own phase gate)
+### Later provider boundary
 
-- `crates/ai-ollama-runtime`: local runtime lifecycle (detect, install, spawn, stop, pull, remove, progress); separate from generation by dependency set and port
-- `crates/ai-tauri`, `packages/tauri`: channel sink, operation registry, blocking-run helper, renderer bridge; conditional on demonstrated duplication (Phase 7)
-- `crates/ai-router`, TS `createRouter`: optional routing/fallback (Phase 9)
-- `packages/react`: run hook; not scheduled
+`crates/ai-providers` earns its boundary through HTTP dependencies and provider protocols. Provider SSE/NDJSON parsing, endpoint construction, authorization headers, model discovery, catalog data, and provider response decoding live there. Core does not need an SSE parser merely because the parser is framework-independent.
 
-### Application concerns (never in the SDK)
+`packages/core` and `packages/ai-sdk` earn separate boundaries because renderers need contracts and event consumption without the Vercel AI SDK. The adapter exposes our typed factories; third-party model instances are internal.
 
-| Owner | Stays |
+Credential resolution belongs at the provider boundary; persistence and consent remain application-owned. Do not extract Skriuw's consent/vault enums into core, and do not add unused credential resolvers in Phase 1.
+
+### Optional platform boundaries
+
+- Ollama generation and lifecycle remain separate. Lifecycle needs process/filesystem/archive dependencies. The application composes startup and generation; the provider crate does not gain a lifecycle dependency, even behind a feature.
+- Tauri helpers require evidence that common mechanisms remain after migration. Command names and generated binding ownership remain in applications. Specta support is a later explicit compatibility decision.
+- React hooks require demonstrated shared behavior. No UI package is scheduled.
+- Routing has no initial package, port, attempt list, fallback flags, or health store in core.
+
+### Application concerns
+
+| Owner | Remains application-owned |
 | --- | --- |
-| Dora | `SchemaContext`, dialect detection, SQL prompts and safety rules, the `{sql, explanation, warnings}` shape, insert/run flow, AES-GCM key table, `pkexec` keyring installer, usage table, all Tauri commands, studio UI, tier heuristics, recommended SQL models |
-| Skriuw | editor extraction and ProseMirror/CodeMirror apply, in-place review, task/tag plans and their parsers, built-in and workspace prompts and shadowing, consent versions and disclosure copy, vault-tier UX, run-history persistence and retention, opt-in gate, all commands and renderer stores, recommended writing models |
-| Betalingen | source allowlist, auth pass-through, IBAN masking, the Dutch data-assistant prompt, screen-context contract, dashboard publishing, route policy (auth, body limit, 503), UI |
-| every app | credential persistence, usage persistence, settings persistence, command/route surfaces, React stores, model recommendation lists |
+| Dora | Schema context, dialect and SQL prompts, SQL output schema and safety, key pool policy and storage, usage persistence, recommended models, commands, UI |
+| Skriuw | Editor extraction/apply/review, task/tag parsing, built-in and workspace prompts, consent/disclosure, vault/session storage, prompt retention and history persistence, lazy startup and opt-in gate |
+| Betalingen | Source allowlist, authorization pass-through, masking, financial prompt and screen context, route limits/auth/503 policy, browser UI |
+| All applications | Settings, credential persistence, product defaults, result interpretation, command/HTTP compatibility |
 
-### Postponed features (require a consumer and a new ADR)
-
-Routing/fallback (Phase 9 at the earliest), Ollama lifecycle (Phase 6), Tauri helpers (Phase 7), task-prompt data package, React hooks, Hono/Next.js helpers, tool calling (a `ContentPart` variant is reserved by the tagged-union design, nothing more), embeddings, transcription, browser BYOK, Specta derives (feature, Phase 7).
-
-## Why application context construction stays application-owned
-
-1. **It is where the domain lives.** Dora's `append_schema_block` encodes table/column/index truncation limits and dialect rules; Betalingen's `buildScreenContext` encodes an authorization pass-through and IBAN masking; Skriuw's `actionInputText` encodes ProseMirror selection semantics. None of that is AI knowledge, and an SDK that owned it would have to depend on a database schema type, a financial record type, and an editor state type.
-2. **The seam is already context-free in two of three apps.** Skriuw's request carries no context object (`crates/skriuw-domain/src/ai.rs`); Betalingen renders context into the user message inside the route. Dora's `AIRequest.context: Option<SchemaContext>` is the one place the provider layer knows about a product type, and it is the source of Dora's coupling (every adapter calls `prompts::build`). The SDK must not inherit the outlier.
-3. **Preview equals payload.** Skriuw deliberately sends only what the user can see so that the reviewed suggestion corresponds exactly to what the model received. Centralized context assembly would break that guarantee for the app that cares most about it.
-4. **Prompts encode policy.** "NEVER emit DROP without WHERE", "Antwoord in het Nederlands", "Keep the language of the original" are product decisions with safety and localization consequences. Centralizing them would make the SDK the owner of every application's safety posture.
-5. **What can be shared is small and mechanical**: a `Message` model so history is not string-packed, and byte/token estimation so applications can budget context against `contextWindowTokens`. Those are in core. A context-block helper (label + data + "data, not instructions" framing + byte budget) is a candidate for a later utility once two applications adopt the same shape; it is not in v1.
+No application prompt catalog or context builder is extracted. A provider's minimal verification prompt may live in its adapter. A future generic structured-output instruction requires explicit opt-in and belongs to provider execution, not product context assembly.
 
 ## Non-goals
 
-The SDK is not, and must not grow into:
+No agents, workflows, chains, tool execution, embeddings, transcription, prompt marketplace, task framework, React UI kit, fixed-command Tauri plugin, Hono/Next.js package, shared telemetry database, browser secret store, or replacement for Vercel AI SDK.
 
-- an agent framework, tool-execution loop, or MCP client (no consumer sends tools; Dora's MCP spec is Dora *serving* tools)
-- a workflow, chains, or pipeline engine (every existing feature is one request)
-- a prompt registry, prompt marketplace, or universal prompt store (Skriuw's workspace prompts are workspace data; Dora's prompts are code)
-- a task API in core (`generateSql()`, `rewriteNote()`, `askAboutScreen()` are application functions)
-- an embeddings, vector, or retrieval layer (only frozen Skriuw v1 had embeddings)
-- a transcription or image-generation layer
-- a React UI kit, chat component set, or model picker
-- a Tauri plugin with fixed commands, permissions, or generated bindings
-- a Hono, Next.js, or Bun framework package
-- a database abstraction, settings store, or application state library
-- a shared usage database or telemetry uploader (both desktop apps forbid uploads; the SDK emits records to a port)
-- a replacement for, or a public re-export of, the Vercel AI SDK
-- a custom HTTP client abstraction beyond `reqwest`/`fetch` injection
-- a full TypeScript reimplementation of provider wire protocols
-- a browser BYOK credential store
-- a source of model tier heuristics (`flagship/balanced/fast` by substring)
-- a place for provider-specific option bags (`extra`, `options`, `metadata`, `Record<string, unknown>`, `serde_json::Value` on requests)
-- an automatic local→remote fallback
-
-Capabilities are added only when supported by an existing consumer or a clearly approved upcoming requirement, and each addition gets its own ADR.
+No public `any`, broad `unknown`, provider metadata escape hatch, or arbitrary JSON option bag. Dynamic provider bodies are decoded inside adapters. Future schema payloads need a bounded schema contract; they do not justify weakening all request types.
 
 ## Consequences
 
-- The initial repository has two Rust crates and two TypeScript packages of substance, plus `xtask`, `specs/`, and `fixtures/`. Empty placeholder packages are not created.
-- Migrations move application prompt builders *out* of provider layers (Dora) rather than *into* the SDK.
-- Any pull request adding a provider name, prompt string, storage engine, or application type to `ai-core`/`packages/core` is rejected on scope grounds.
+Phase 1 is an extraction with a reviewable compatibility inventory plus the two approved edge-behavior changes (D1, D2), not implementation of every audit sketch. New request shapes and behavior require a later approved contract gate. Fewer packages are created, and no application must migrate its renderer simply to consume the extracted Rust core.

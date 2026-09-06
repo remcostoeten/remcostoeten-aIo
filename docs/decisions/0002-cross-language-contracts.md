@@ -1,92 +1,59 @@
 # ADR 0002: cross-language contracts
 
-Status: accepted (Phase 0, 2026-09-06)
+Status: accepted at Phase 0 closure, 2026-09-06. Supersedes the original numeric, versioning, and fixture-parity claims.
 
 ## Context
 
-The SDK must serve Rust (Skriuw, Dora: Tauri desktop) and TypeScript (Betalingen: Bun/Node/Vercel; the Skriuw and Dora renderers; future Next.js/serverless). The two languages must represent the same semantic states for shared contracts (`AGENTS.md`, "Cross-language contracts").
+Skriuw generates schemas from Rust and hand-writes TypeScript types in `app/src/contracts/ai.ts`. That file is not a set of Zod schemas inferred into types. Betalingen does infer its application contracts from Zod. The SDK can adopt Zod later, but must describe that as new work.
 
-Actual interoperability requirements found in the repositories (audit §18.1):
-
-- The only Rust↔TypeScript wire boundary is **inside the Tauri apps**: command arguments and `tauri::ipc::Channel<AiCompletionEvent>` / `Channel<AiStreamEvent>`. It is JSON. Skriuw generates JSON Schemas from Rust (`crates/xtask/src/main.rs`, `contracts/generated/ai-*.schema.json`) and hand-mirrors them in `app/src/contracts/ai.ts` with a drift check. Dora uses `tauri-specta` to generate `packages/studio/src/lib/bindings.ts`.
-- No Rust code calls TypeScript AI code; no TypeScript code calls Rust AI code over HTTP. Betalingen has no Rust. Skriuw's Cloudflare Worker has no AI. The browser builds do not run providers.
-- The Vercel AI SDK appears at two incompatible majors (`ai@7` in Betalingen, `ai@6` in frozen Skriuw v1).
-
-## Options
-
-| Option | Assessment |
-| --- | --- |
-| **A. Rust implementation reused everywhere** (TS calls Rust via FFI/WASM/sidecar) | Only meaningful inside Tauri, where it is already the case. Betalingen runs on Vercel's Node runtime with a single esbuild bundle; a WASM or native module for HTTP streaming there solves nothing and complicates deploys. Rejected as the general strategy; inside Tauri the Rust side *is* the implementation anyway. |
-| **B. TypeScript implementation reused everywhere** (Rust embeds a JS runtime) | No consumer wants a JavaScript runtime inside a desktop process that deliberately keeps AI in Rust (Skriuw ADR-0033). Rejected. |
-| **C. Independent implementations with matching concepts, no shared artifact** | The de facto state today, and the reason Dora's and Skriuw's event shapes diverged (`Token/Final/Error` vs `Delta/Done/Cancelled/Timeout/ProviderError`). Cheap, but drift is guaranteed. Rejected. |
-| **D. Shared language-neutral specification, native implementations** | Skriuw already does half of this (schemas generated from Rust, TS mirror gated). Extending it to the SDK is incremental. Two native implementations, one spec, one fixture set. |
-| **E. Hybrid: D plus a runtime bridge for Tauri** | The Tauri "bridge" already exists and is just JSON over `Channel`; it needs no new protocol. Anything more (a sidecar HTTP server, a shared binary protocol) solves a problem nobody has. |
+Rust/TypeScript interoperation currently happens through Tauri JSON. Betalingen runs independently. No runtime bridge, embedded JS engine, FFI, sidecar, or WASM execution layer is required.
 
 ## Decision
 
-**Option D, with Rust as the schema generator.** Rust and TypeScript share semantic contracts, not implementation, and not a wire protocol beyond what the Tauri channel and NDJSON already are.
+Share semantic contracts and fixtures, with Rust generating structural JSON Schema. Preserve the Skriuw extraction wire contract first. TypeScript implementation starts only in Phase 4.
 
-### Shared artifacts (`specs/`, `fixtures/`)
+### Phase 1 artifacts
 
-| Artifact | Form | Why shared |
-| --- | --- | --- |
-| `completion-request`, `completion-event`, `provider-error`, `model-ref`, `model-info`, `completion-outcome`, `run-record`, `credential-error`, `local-runtime-*` | JSON Schema, generated from Rust `schemars` derives by `xtask`, committed | The same shapes cross the Tauri channel, are accepted by a Hono route, and are persisted by applications |
-| `error-categories.json` | table: `id`, `defaultRecovery`, `retryableBeforeFirstDelta`, `fallbackEligible` | UIs branch on categories in both languages; the runtime's retry rule and a future router read the flags |
-| `capabilities.json` | list | catalog data and the structured-output ladder in both languages |
-| `providers.json` | provider descriptors incl. OpenAI-compatible rows | drives the Rust adapter directly and configures the TS `openaiCompatible` adapter |
-| `models.json` | priced catalog (Skriuw's format: integer micro-dollars, `contextWindowTokens`, `pricingAsOf`, version) | both languages display, price, and gate on it |
-| `fixtures/streams/<provider>/<case>.sse` + `.events.json` | golden provider input → expected event sequence | both implementations must produce identical output |
-| `fixtures/errors/<provider>/<case>.json` | status + body → category + recovery | shared mapper truth |
-| `fixtures/fake-scripts/*.json` | fake-provider scripts | runtime tests behave identically in both languages |
-| `VERSION` | spec semver | see versioning |
+Generate schemas only for extracted serializable contracts; commit positive and negative request/event/error fixtures and the spec version. Preserve source serialization and null behavior. Fake scripts can remain Rust test inputs initially; do not invent a shared serialization for `Duration` or runtime objects just to populate a fixtures directory. The D2 `RunSummary` is an in-process port argument, not a shared wire contract: it gets no schema and no fixtures in Phase 1, and history numeric encoding stays deferred with the shared history DTO.
 
-Not shared: implementation code, async model (sink-based Rust vs `AsyncIterable` TS), credential types (never serializable), the `Runtime` object, any framework glue.
+Generation and check commands must be defined by the implementation tooling. The actual Skriuw command is `cargo run -p xtask -- generate --check`, not `-- check`. A new `xtask` crate is not mandatory; see ADR 0001.
 
-### Wire conventions
+Credential errors, model catalogs, capabilities, structured results, and local-runtime schemas are introduced only with their consuming phase. No retry/fallback policy table belongs in the extraction spec.
 
-- Field names camelCase; union tag field `type` with snake_case values; string enums snake_case.
-- Numbers are integers: milliseconds, micro-dollars, bytes, tokens, fixed-point millis for temperature/top-p. No floats anywhere on the wire, so fixtures are byte-identical across languages and JSON number handling is a non-issue.
-- Optional means absent or `null`, and both languages accept either.
-- `CompletionRequest` (and its nested types) uses `deny_unknown_fields`: it crosses trust boundaries (IPC, HTTP) and Skriuw's strictness there is a security property.
-- `CompletionEvent` accepts unknown *fields* on known kinds (an additive field such as `finishReason` is a minor bump and rolling consumers must tolerate it) but rejects unknown *kinds* (a new event kind is a breaking change for exhaustive consumers).
+### Wire rules
 
-### TypeScript contracts: generated or conformance-checked
+- Fields use camelCase; existing union tags and string enums use snake_case. Preserve `recoveryAction`, existing error categories, and strict unknown-field rejection from Skriuw in Phase 1.
+- Preserve nullable fields: Rust emits `null` for absent sampling parameters and `done.usage`; decoders accept omission where source serde does. Canonical fixture output uses explicit `null` for these fields. Do not silently change to omission-only output.
+- JSON objects are compared semantically; key order, whitespace, and escape spelling are not a contract. Integer fields do not make JSON byte-identical.
+- JavaScript numbers cannot represent all Rust `u64` or `i64` values. Future shared integer fields must have explicit safe bounds (absolute value at most 9,007,199,254,740,991), or use a separately specified decimal-string encoding. Phase 1 completion token counts already have a 1,000,000,000 bound; do not claim the existing history timestamp/cost types have the same guarantee.
+- Monetary computation can overflow JavaScript's exact-integer range in intermediate products even when inputs and final amounts are safe. Preserve Skriuw's round-half-up formula using exact intermediate arithmetic (`u128` in Rust; an equivalent exact method, such as internal BigInt, in TS). BigInt is not emitted directly as JSON.
+- UTF-8 byte limits require UTF-8 measurement in TS, not `.length` or JSON Schema `maxLength`. Reject unpaired UTF-16 surrogates at a TS boundary intended to match Rust strings. JSON Schema alone cannot express every aggregate byte budget or stream-state invariant.
+- Optional or nullable fields must be described per contract, not with a global rule accepting null everywhere. Serde `rename_all` on enums does not automatically rename fields within variants; inspect fixtures for tags and fields separately.
 
-Decided: hand-written zod schemas with types inferred from them, conformance-checked against the JSON Schemas in CI. This is what Skriuw does today (`app/src/contracts/ai.ts` + drift check) and it needs no generator tooling. Generation from `specs/schema` becomes a new ADR only if conformance checks catch repeated drift. Consequently:
+### Validation and drift
 
-- zod schemas exist for every contract that crosses a trust boundary (Betalingen and Skriuw both validate at boundaries already) and are checked against the JSON Schema by validating every fixture with both.
-- Every fixture is validated by the zod schema and by a JSON Schema validator in the TS test suite; every fixture round-trips through Rust serde. Divergence fails CI.
+Phase 1 preserves existing explicit `validate()` calls. Derived schemas describe structure; successful `Deserialize` or schema parsing does not imply the request satisfies runtime validation.
 
-### Schema drift
+Later TypeScript schemas may be hand-written Zod with inferred types. Compare structural acceptance and semantic validators separately. Test positive and negative cases: unknown fields/kinds/enums, omitted/null fields, overflow, UTF-8 boundaries, invalid identifiers, variant combinations, and stream sequences. Keep explicit numeric and string-boundary fixtures and generated property cases. A finite fixture set catches regressions; it does not prove validator equivalence for every possible value.
 
-`cargo run -p xtask -- check` regenerates schemas from the Rust types and fails if the committed `specs/schema` differs (Skriuw's existing mechanism). The TS suite fails if its types or zod schemas reject any committed fixture or accept a fixture the JSON Schema rejects. A change to a Rust type therefore fails CI until the schema is regenerated *and* the TS side is updated, which is the intended friction.
-
-### Golden fixtures
-
-Fixtures are the executable half of the spec. Seeds: Skriuw's inline test bodies in `crates/skriuw-ai-remote/src/lib.rs` (SSE framing, `stream_options` gating, Gemini and Groq streams, malformed/oversized cases), `crates/skriuw-ai-ollama/src/lib.rs` (NDJSON pull/generate streams), Betalingen's `providerResponse()` in `src/lib/ai/ai.test.ts`. A provider without fixtures fails CI (ADR 0003).
+Provider fixtures in Phase 2 preserve adapter parsing behavior. Cross-language conformance in Phase 4 compares accumulated text, identity, valid sequence, terminal, error category, and usage. Transport/network chunk boundaries may differ between parsers; do not require identical delta segmentation. Fake providers with a fixed script must reproduce the same segmentation and outcome, but elapsed wall-clock timing is not compared byte-for-byte.
 
 ### Versioning
 
-- `specs/VERSION` is a semver string exported as `specVersion` by both cores and embedded in every schema file's `$id`.
-- **Patch**: documentation, descriptions, additional fixtures.
-- **Minor**: additive optional field on a non-`deny_unknown_fields` contract; new `ErrorCategory`/`RecoveryAction`/`Capability` value (Rust enums are `#[non_exhaustive]`; TS consumers keep a documented fallback arm); new provider descriptor row; new catalog entries.
-- **Major**: any field on `CompletionRequest`; any new event kind; renaming or removing anything; changing the meaning of an existing value.
-- A change that compiles in both languages but alters serialized meaning is a contract change and bumps the version. Reviewers check `specs/VERSION` on any PR touching `ai-core` public types.
-- Crate/package versions track the spec's major; a crate may bump minor/patch independently.
+`specs/VERSION` identifies a semantic version; generated schema `$id` values include it. Do not add a version field to completion events during extraction.
 
-### Tauri JSON boundaries
+- Patch: descriptions or fixtures clarifying unchanged behavior.
+- Minor: compatible additions only on contracts explicitly designed to accept them, or catalog entries under an already supported descriptor format.
+- Breaking: adding fields to a strict request/event, changing accepted bounds or null behavior incompatibly, adding a value to a closed enum, adding a union variant, removing/renaming fields, or changing their meaning. Record these explicitly even while the SDK is prerelease.
 
-- The Tauri channel carries `CompletionEvent` JSON exactly as specified; no Tauri-specific envelope. Skriuw's `Channel<AiCompletionEvent>` already is this.
-- Dora's generated bindings require `specta::Type`; the core derives it behind a `specta` feature (Phase 7) so that Dora keeps its typed `commands` object without `specta` becoming a default dependency of `ai-core`. Dora's snake_case wire casing for AI payloads becomes camelCase on migration (Phase 8), contained to the `ai-assistant` and `ai-cmd-k` modules.
-- Command names, arguments beyond the SDK types (Dora `connection_id`, Skriuw `origin` validation and consent), and IPC error envelopes remain application-owned. The SDK specifies payload types, not commands.
-- Non-streaming results cross IPC as `CompletionOutcome` JSON, avoiding a channel for tiny completions.
+Rust `#[non_exhaustive]` changes source matching obligations; it does not teach serde or a TS validator to accept unknown wire values. A TS fallback to `internal` would erase a real state and does not make a closed enum forward-compatible. Reserve no unused enum variants to avoid future versioning.
 
-### No runtime bridge
+### Framework boundary
 
-No Rust↔TypeScript runtime bridge, sidecar, FFI, or WASM binding is built. If a consumer ever needs one, it is a new ADR with that consumer as evidence.
+Tauri carries application-selected JSON payloads. Command names, arguments, Specta integration, and IPC errors are application concerns. Optional future derives must not make Tauri a core dependency.
+
+Vercel AI SDK models, errors, stream parts, and Zod transforms are not language-neutral wire types. The Vercel adapter creates its models internally from our typed configuration and credential port. There is no public `fromLanguageModel(unknown)` workaround.
 
 ## Consequences
 
-- `crates/xtask` and `specs/` are created in Phase 1 alongside `ai-core`; `packages/core` in Phase 4 must reproduce every fixture bit-for-bit before Betalingen migrates.
-- Two implementations must be maintained. The cost is bounded by the fixture set: a behavior is defined once, in a fixture, and both implementations are held to it.
-- Skriuw's `contracts/generated/ai-*.schema.json` are superseded by `specs/schema` in Phase 3; Skriuw's drift check points at the SDK's schemas.
+Schema tooling is development-only. Phase 1 freezes a compatibility baseline; later changes are versioned rather than advertised as a re-export. Shared schemas cover shared DTOs, not every Rust in-process port or application history record.
