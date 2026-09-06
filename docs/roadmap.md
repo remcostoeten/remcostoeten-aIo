@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: Phase 0 complete; Phase 1 approved but not begun. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
+Status: Phases 0 and 1 complete; Phase 2 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
 
 The phase order follows AGENTS.md. The audit's larger package/feature list is not a required deliverable. Every phase defines a single purpose, preserves dependency direction, and records any behavior change separately.
 
@@ -49,7 +49,7 @@ Generate/check structural schemas and run semantic validation tests. Compare ser
 
 ### Exit
 
-Phase 1 is finished when every item below is demonstrably true, and not before:
+**Met on 2026-09-06.** `docs/extraction-inventory.md` records what moved, the two approved behavior changes, and the test mapping. 74 tests and the schema check pass; no runtime dependency on HTTP, credentials, a framework, an async runtime, or Skriuw. Phase 1 is finished when every item below is demonstrably true, and not before:
 
 1. `crates/ai-core` exists with the extracted contracts, ports, service and fake; the source revision and a symbol/test inventory are recorded.
 2. Request, event and error fixtures round-trip byte-compatibly in meaning with Skriuw's current wire shapes, compared semantically per ADR 0002.

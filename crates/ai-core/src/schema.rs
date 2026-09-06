@@ -1,7 +1,9 @@
 //! Structural JSON Schema generation for the serialized contracts.
 //!
-//! Development tooling, behind the `schema-tool` feature, so `serde_json` never
-//! enters a consumer's runtime dependency graph.
+//! Development tooling, behind the `schema-tool` feature, so no `serde_json`
+//! type reaches the library's public API. `schemars` depends on `serde_json`
+//! transitively either way; the gate is about the contract surface, not the
+//! dependency count.
 //!
 //! A generated schema describes structure only. Passing it proves a document
 //! decodes, never that the value satisfies its `validate` rules — combined

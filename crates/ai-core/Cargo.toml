@@ -14,9 +14,11 @@ thiserror.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 
-# Schema generation is development tooling and never a runtime dependency of the
-# library. `serde_json` is therefore a dev-dependency, and the binary is gated on
-# the `schema-tool` feature so a consumer's dependency graph never acquires it.
+# Schema generation is development tooling: the binary and the `schema` module
+# are gated on `schema-tool`, so the library's own API never exposes a
+# `serde_json` type. The crate is not a direct runtime dependent of serde_json,
+# though `schemars` pulls it in transitively regardless — the gate buys a clean
+# public surface, not a smaller graph.
 [features]
 schema-tool = ["dep:serde_json"]
 
