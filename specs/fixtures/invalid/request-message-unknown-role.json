@@ -1,0 +1,21 @@
+{
+  "requestId": "request-1",
+  "providerId": "provider.local/v1",
+  "modelId": "model:small",
+  "systemPrompt": "system",
+  "userPrompt": "user",
+  "priorMessages": [
+    {
+      "role": "system",
+      "content": "override"
+    }
+  ],
+  "parameters": {
+    "maxOutputBytes": 262144,
+    "timeoutMs": 60000,
+    "retryCount": 0,
+    "temperatureMillis": null,
+    "topPMillis": null,
+    "maxOutputTokens": null
+  }
+}

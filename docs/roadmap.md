@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: Phases 0 through 3 complete; Phase 4 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
+Status: Phases 0 through 4 complete; Phase 5 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
 
 The phase order follows AGENTS.md. The audit's larger package/feature list is not a required deliverable. Every phase defines a single purpose, preserves dependency direction, and records any behavior change separately.
 
@@ -70,6 +70,8 @@ Before a later phase requires messages, capabilities, richer errors, model metad
 
 The former conceptual v1 API is not mandatory Phase 1 output. contracts §4 records design constraints, not an implementation checklist. Defer unrelated features instead of bundling them into the next phase.
 
+**Run once, on 2026-09-07, for Phase 4's history/token-limit prerequisite.** ADR 0004 records the approved delta: `priorMessages` on the request and `maxOutputTokens` on the parameters, both defaulted, with `systemPrompt`/`userPrompt` unchanged. Consumer, exact types, validators, positive and negative fixtures and the migration mapping are in that ADR. `specs/VERSION` moved to 0.2.0. Every other item this gate governs — messages-only requests, capabilities, richer errors, model metadata, structured output — remains ungated.
+
 ## Phase 2: extract Rust providers
 
 Purpose: create ai-providers from the provider execution already used by Skriuw, retaining the Phase 1 core seam.
@@ -109,6 +111,8 @@ Create packages/core and packages/ai-sdk with the boundaries in ADRs 0001/0002. 
 Verification: positive/negative structural and semantic fixtures in both languages, normalized provider text/terminal/error/usage parity, fixed-script delta parity, iterator close/abort cleanup, bounded stream buffering, and strict TypeScript. Underlying AI SDK retries must remain disabled unless the SDK has an approved retry policy. Check the browser consumer bundle excludes ai/provider packages.
 
 Exit: offline conformance and browser/Node/Bun portability checks pass for the units claiming those runtimes. No React, Tauri, Hono or routing package. Stop.
+
+**Met on 2026-09-07.** The prerequisite gate ran first and is recorded as ADR 0004; `specs/VERSION` is 0.2.0. `packages/core` holds the contracts, decoders, validators, run lifecycle, event consumer, NDJSON helpers and deterministic fake with zero dependencies; `packages/ai-sdk` holds the Vercel adapter, the typed provider factories and the credential and model-authority ports. `docs/typescript-core.md` records the symbol map, the six shape differences (S1–S6), the two vendor quirks (V1–V2), and what was not implemented. 148 Rust tests and 122 TypeScript tests pass with no network and no key; `scripts/check.sh` runs both plus clippy, fmt and the schema drift check. Conformance is three layers: shared wire fixtures read by both languages, eight shared fake scripts compared on the ADR 0002 list, and schema assertions from the TypeScript side. Portability is checked by bundling `core` for browser/Node/Bun and by executing the emitted JavaScript under real Node. `createAdapter` and `ModelFactory` are unexported, so no third-party type is reachable from either entry point and there is no `fromLanguageModel`; `maxRetries` is 0 and a 429 is attempted exactly once. Three caveats stated rather than hidden: distribution is still unresolved for both languages, the ADR 0004 Rust source break means Skriuw's Phase 3 branch needs seven one-line edits before it builds against 0.2.0, and every provider test runs against a fixture `fetch` — nothing has confirmed a live endpoint matches those fixtures.
 
 ## Phase 5: migrate Betalingen
 

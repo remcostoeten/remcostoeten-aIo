@@ -31,6 +31,7 @@
 //!         model_id: "model".to_owned(),
 //!         system_prompt: String::new(),
 //!         user_prompt: "hello".to_owned(),
+//!         prior_messages: Vec::new(),
 //!         parameters: AiCompletionParameters::default(),
 //!     },
 //!     Collector(sender),
@@ -57,9 +58,10 @@ mod service;
 
 pub use contracts::{
     AiCompletionDelta, AiCompletionEvent, AiCompletionParameters, AiCompletionRequest,
-    AiCompletionTerminal, AiProviderError, AiProviderErrorCategory, AiRecoveryAction, AiUsage,
-    AiValidationError, MAX_AI_DELTA_BYTES, MAX_AI_DURATION_MS, MAX_AI_ERROR_MESSAGE_BYTES,
-    MAX_AI_IDENTIFIER_BYTES, MAX_AI_PROMPT_BYTES, MAX_AI_RESPONSE_BYTES, MAX_AI_RETRIES,
+    AiCompletionTerminal, AiMessage, AiMessageRole, AiProviderError, AiProviderErrorCategory,
+    AiRecoveryAction, AiUsage, AiValidationError, MAX_AI_DELTA_BYTES, MAX_AI_DURATION_MS,
+    MAX_AI_ERROR_MESSAGE_BYTES, MAX_AI_IDENTIFIER_BYTES, MAX_AI_OUTPUT_TOKENS,
+    MAX_AI_PRIOR_MESSAGES, MAX_AI_PROMPT_BYTES, MAX_AI_RESPONSE_BYTES, MAX_AI_RETRIES,
     MAX_AI_TOKEN_COUNT,
 };
 pub use fake::{FakeAiProvider, FakeCompletionOutcome, FakeCompletionScript};

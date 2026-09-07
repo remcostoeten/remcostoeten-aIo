@@ -6,11 +6,20 @@ The SDK owns completion execution. Applications own context, prompts, consent, p
 
 ## Status
 
-**Phases 0 and 1 complete. Phase 2 has not begun and is not authorized.**
+**Phases 0 through 4 complete. Phase 5 has not begun and is not authorized.**
 
-`crates/ai-core` now exists: the completion contracts, ports, service, deterministic fake and recorder port, extracted from Skriuw and covered by 74 offline tests plus a schema drift check. It has no HTTP client, no credential store, no framework and no async runtime, and nothing in Skriuw, Dora or Betalingen was modified. See [the extraction inventory](docs/extraction-inventory.md) for what moved and the two approved behavior changes.
+Spec version 0.2.0. Four units exist:
 
-The Phase 0 review found that the original Phase 1 plan combined extraction with incompatible contract changes and overstated Skriuw's runtime guarantees. The revised plan separates the existing extraction contract from later design candidates. Both blocking decisions are now taken: Phase 1 applies narrow lifecycle hardening after source characterization, and uses a metadata-only recorder summary with the request borrowed for the callback, leaving prompt retention in the application. See [review findings](docs/architecture.md#4-phase-0-critical-review), [decisions](docs/architecture.md#5-decisions-taken), and [verdict](docs/architecture.md#6-verdict).
+| Unit | What it is |
+| --- | --- |
+| `crates/ai-core` | Rust completion contracts, ports, service, deterministic fake, recorder port |
+| `crates/ai-providers` | Seven remote descriptors, the Gemini dialect, Ollama generation, credential and model-authority ports |
+| `packages/core` | The same contracts, run lifecycle, event consumer, NDJSON helpers and fake in TypeScript — zero dependencies |
+| `packages/ai-sdk` | The Vercel AI SDK adapter and typed provider factories |
+
+`./scripts/check.sh` runs everything: 148 Rust tests, 122 TypeScript tests, clippy, fmt and the schema drift check. No step needs a network, a provider key, or a sibling checkout.
+
+Skriuw runs on the Rust crates ([integration notes](docs/integration-skriuw.md)); nothing in Dora or Betalingen has been modified. Distribution is unresolved for both languages — the crates are path dependencies and the packages are workspace-only.
 
 ## Evidence
 
@@ -22,26 +31,55 @@ The Phase 0 review found that the original Phase 1 plan combined extraction with
 
 The requested `ai-sdk-architecture-research.md` does not exist in this checkout. The complete audit is [architecture research across my AI apps](dev-docs/knowledge/architecture-research-across-my-ai-apps.md), the path named by `AGENTS.md` and `CLAUDE.md`. It is historical evidence, not permission to implement its proposals. Reference implementation wins when it disagrees with documentation about existing behavior.
 
-## The extracted core
+## The seam
 
-One production crate, `crates/ai-core`: the completion contracts and their validators, cancellation, the synchronous sink-based completion trait, the service, a deterministic fake, and a metadata-only recording port. Skriuw's request/event JSON and error vocabulary are preserved; only the edge behaviors in [contracts §3.3](docs/contracts.md) changed. Schema generation is development tooling behind a feature flag, not a second production package.
+A validated request goes in; ordered deltas and exactly one terminal come out. The SDK knows nothing about products, prompts, persistence or UI.
+
+```ts
+import { buildRequest, consumeEvents, createRuntime } from '@ai-sdk-local/core'
+import { createGroqProvider, staticCredential } from '@ai-sdk-local/ai-sdk'
+
+const provider = await createGroqProvider({
+  credentials: staticCredential(serverSideKey),
+  models: { permits: (_, modelId) => modelId === 'llama-3.3-70b-versatile' },
+})
+
+const built = buildRequest({
+  requestId, providerId: 'groq', modelId: 'llama-3.3-70b-versatile',
+  systemPrompt: 'Be brief.',
+  messages: conversation,
+  parameters: { maxOutputTokens: 1800 },
+})
+if (!built.ok) return reject(built.error.reason)
+
+const started = createRuntime({ providers: [provider] }).stream(built.request)
+if (!started.ok) return reject(started.error.reason)
+
+const outcome = await consumeEvents(started.events)
+```
+
+More of both languages — streaming over NDJSON, cancellation, untrusted requests, run accounting, model listing — is in [example usage](docs/examples.md).
+
+Rust and TypeScript share semantic contracts and fixtures, not a runtime bridge. Both read `specs/fixtures/`; both run the same eight fake scripts and must produce the same segmentation, terminal, error category and usage.
+
+No retries, structured output, routing, provider fallback, agents, or framework helpers exist in any of it. Ollama lifecycle has a distinct platform boundary; Tauri and React helpers remain conditional.
 
 ```
-cargo test --all-features
-cargo run -p ai-core --features schema-tool --bin ai-schema -- generate --check
+./scripts/check.sh
 ```
-
-No HTTP adapters, message-history redesign, retries, structured-output engine, credential stores, codecs, async facade, or framework helpers are in it.
-
-Later, separately approved phases may add `crates/ai-providers`, `packages/core`, and `packages/ai-sdk` (the Vercel adapter). Ollama lifecycle has a distinct platform boundary; Tauri and React helpers remain conditional. Rust and TypeScript share semantic contracts and fixtures, not a runtime bridge.
 
 ## Documents
 
+- [Example usage, in both languages](docs/examples.md)
 - [Architecture, findings, decisions taken, and verdict](docs/architecture.md)
-- [Phase 1 extraction inventory](docs/extraction-inventory.md)
-- [Extraction contracts and deferred design constraints](docs/contracts.md)
+- [Contracts and deferred design constraints](docs/contracts.md)
 - [Phase gates](docs/roadmap.md)
+- [Phase 1 extraction inventory: `ai-core`](docs/extraction-inventory.md)
+- [Phase 2 extraction inventory: `ai-providers`](docs/extraction-inventory-providers.md)
+- [Phase 3: what consuming the SDK cost Skriuw](docs/integration-skriuw.md)
+- [Phase 4: TypeScript core and Vercel adapter](docs/typescript-core.md)
 - [ADR 0001: scope](docs/decisions/0001-sdk-scope.md)
 - [ADR 0002: cross-language contracts](docs/decisions/0002-cross-language-contracts.md)
 - [ADR 0003: provider boundary](docs/decisions/0003-provider-boundary.md)
+- [ADR 0004: conversation history and an output token limit](docs/decisions/0004-history-and-token-limit.md)
 - [Repository instructions](AGENTS.md)

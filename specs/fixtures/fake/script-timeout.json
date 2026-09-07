@@ -1,0 +1,17 @@
+{
+  "description": "Timeout is a terminal of its own, after the text already emitted.",
+  "script": {
+    "segments": [
+      "partial"
+    ],
+    "outcome": {
+      "type": "timeout"
+    }
+  },
+  "deltas": [
+    "partial"
+  ],
+  "terminal": {
+    "type": "timeout"
+  }
+}

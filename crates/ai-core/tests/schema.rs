@@ -59,6 +59,7 @@ fn schema_generation_covers_every_serialized_contract() {
         names,
         vec![
             "completion-parameters",
+            "message",
             "completion-request",
             "completion-delta",
             "usage",

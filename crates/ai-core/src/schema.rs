@@ -15,7 +15,7 @@ use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
 use serde_json::Value;
 
 use crate::contracts::{
-    AiCompletionDelta, AiCompletionEvent, AiCompletionParameters, AiCompletionRequest,
+    AiCompletionDelta, AiCompletionEvent, AiCompletionParameters, AiCompletionRequest, AiMessage,
     AiProviderError, AiUsage,
 };
 
@@ -39,6 +39,7 @@ pub struct GeneratedSchema {
 pub fn generate_all() -> Vec<GeneratedSchema> {
     vec![
         generated::<AiCompletionParameters>("completion-parameters"),
+        generated::<AiMessage>("message"),
         generated::<AiCompletionRequest>("completion-request"),
         generated::<AiCompletionDelta>("completion-delta"),
         generated::<AiUsage>("usage"),

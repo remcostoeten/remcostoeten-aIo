@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.ai-sdk.local/0.1.0/completion-parameters.json",
+  "$id": "https://schemas.ai-sdk.local/0.2.0/completion-parameters.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Execution parameters for one completion.\n\n`retry_count` is accepted and validated but inert: no retry is performed.\nSampling parameters are thousandths, so 0 through 1000, and may be omitted\non the wire as well as sent explicitly as `null`.",
@@ -9,6 +9,16 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "maxOutputTokens": {
+      "default": null,
+      "description": "Output token ceiling asked of the provider, or `null` for its default.\n\nDistinct from `max_output_bytes`, which is this side's accumulation cap\nand is enforced locally. A provider that ignores this field is not a\ncontract violation; the byte cap still applies.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "retryCount": {
       "description": "Accepted but inert. Present for wire compatibility only.",

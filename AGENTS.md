@@ -801,33 +801,22 @@ Adding a provider without provider fixtures should eventually fail CI.
 
 ## Current phase
 
-The repository starts in:
+Phases 0 through 4 are complete. The repository holds `crates/ai-core`,
+`crates/ai-providers`, `packages/core` and `packages/ai-sdk` at spec version
+0.2.0.
 
-# Phase 0: Architecture contract
+Read the closing record of each phase in `docs/roadmap.md`, and the inventory
+for whichever unit you are touching:
 
-No production SDK implementation should be written during Phase 0.
+* `docs/extraction-inventory.md` — `ai-core`
+* `docs/extraction-inventory-providers.md` — `ai-providers`
+* `docs/integration-skriuw.md` — what Skriuw's migration cost
+* `docs/typescript-core.md` — `packages/core` and `packages/ai-sdk`
 
-Do not create production Rust or TypeScript implementation files unless explicitly instructed to leave Phase 0.
+`./scripts/check.sh` runs everything. It must stay green and it must stay
+offline: no step may need a network, a provider key, or a sibling checkout.
 
-Do not scaffold every package/crate from the proposed final architecture.
-
-Allowed work during Phase 0:
-
-* architecture documentation
-* ADRs
-* contract design
-* pseudocode
-* package boundary design
-* dependency design
-* schema planning
-* fixture planning
-* migration planning
-* naming decisions
-* testing strategy
-
-Pseudocode is allowed.
-
-Production implementation is not.
+**Phase 5 has not begun and is not authorized.** Neither has any other phase.
 
 ## Phase gates
 
@@ -954,8 +943,9 @@ Do not silently continue to another phase.
 
 Until explicitly told otherwise:
 
-**Remain in Phase 0.**
+**Remain within Phase 4's closed boundary.**
 
-Research, architecture documentation, ADRs, contract design, and pseudocode are allowed.
-
-Production SDK implementation is not.
+Fixing, documenting, testing and reviewing what exists is allowed. Beginning
+Phase 5 — or any later phase — requires an explicit instruction. So does
+modifying a reference repository, and so does a contract change: run the
+contract evolution gate in `docs/roadmap.md` and record an ADR first.

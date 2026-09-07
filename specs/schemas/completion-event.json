@@ -143,7 +143,7 @@
       "type": "object"
     }
   },
-  "$id": "https://schemas.ai-sdk.local/0.1.0/completion-event.json",
+  "$id": "https://schemas.ai-sdk.local/0.2.0/completion-event.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Everything a consumer observes for one request.\n\nExactly one of the four terminal variants ends a committed run. Unknown\ntags, unknown fields, and unknown enum values are rejected on decode.",
   "oneOf": [

@@ -1,0 +1,14 @@
+{
+  "description": "A run may produce a terminal and no text at all.",
+  "script": {
+    "segments": [],
+    "outcome": {
+      "type": "done"
+    }
+  },
+  "deltas": [],
+  "terminal": {
+    "type": "done",
+    "usage": null
+  }
+}

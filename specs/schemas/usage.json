@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.ai-sdk.local/0.1.0/usage.json",
+  "$id": "https://schemas.ai-sdk.local/0.2.0/usage.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Token counts a provider reported for itself.\n\nAbsent usage means the provider reported none. It never means zero, and\nmust not be fabricated as zero. Estimation lives in run accounting.",

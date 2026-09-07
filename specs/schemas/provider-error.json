@@ -91,7 +91,7 @@
       ]
     }
   },
-  "$id": "https://schemas.ai-sdk.local/0.1.0/provider-error.json",
+  "$id": "https://schemas.ai-sdk.local/0.2.0/provider-error.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A typed provider failure.\n\nCarries no HTTP status, response body, or diagnostics bag: provider bodies\ncan contain prompts or secrets and stay internal to the adapter.",

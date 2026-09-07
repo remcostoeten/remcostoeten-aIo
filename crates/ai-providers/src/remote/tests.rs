@@ -87,6 +87,7 @@ fn request(provider_id: &str, model_id: &str) -> AiCompletionRequest {
         model_id: model_id.into(),
         system_prompt: "Be concise.".into(),
         user_prompt: "Name a colour.".into(),
+        prior_messages: Vec::new(),
         parameters: AiCompletionParameters::default(),
     }
 }
@@ -369,6 +370,35 @@ fn never_opens_a_socket_for_a_model_the_application_did_not_permit() {
         AiProviderErrorCategory::RejectedRequest
     );
     assert!(server.join().expect("server").is_none(), "no socket opened");
+}
+
+/// These descriptors build a single-turn body and no token ceiling. Until they
+/// carry both, a request asking for either is refused rather than answered
+/// without the history or the limit the caller specified.
+#[test]
+fn refuses_rather_than_drops_a_conversation_or_a_token_ceiling() {
+    for mutate in [
+        (|request: &mut AiCompletionRequest| {
+            request.prior_messages = vec![ai_core::AiMessage::user("earlier question")];
+        }) as fn(&mut AiCompletionRequest),
+        |request: &mut AiCompletionRequest| {
+            request.parameters.max_output_tokens = Some(1800);
+        },
+    ] {
+        let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+        let provider = build_provider(RemoteProviderKind::Groq, &base, Arc::new(StoredKey));
+        let mut sink = RecordingSink::default();
+        let mut altered = request(GROQ_PROVIDER_ID, GROQ_MODEL);
+        mutate(&mut altered);
+
+        let terminal = provider.complete(&altered, &AiCancellation::new(), &mut sink);
+
+        assert_eq!(
+            provider_error(terminal).category,
+            AiProviderErrorCategory::RejectedRequest
+        );
+        assert!(server.join().expect("server").is_none(), "no socket opened");
+    }
 }
 
 /// An authority that permits a traversing id still cannot make one addressable:

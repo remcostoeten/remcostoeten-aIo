@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.ai-sdk.local/0.1.0/completion-delta.json",
+  "$id": "https://schemas.ai-sdk.local/0.2.0/completion-delta.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One chunk of streamed output.\n\nSequence numbers start at zero and increase by one. Empty text is accepted.",

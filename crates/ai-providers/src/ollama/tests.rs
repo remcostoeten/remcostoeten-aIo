@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ai_core::{
     AiCancellation, AiComplete, AiCompletionDelta, AiCompletionParameters, AiCompletionRequest,
-    AiCompletionTerminal, AiEventSink, AiProviderErrorCategory, AiRecoveryAction, AiSinkError,
-    AiUsage,
+    AiCompletionTerminal, AiEventSink, AiMessage, AiProviderErrorCategory, AiRecoveryAction,
+    AiSinkError, AiUsage,
 };
 
 use super::{OLLAMA_PROVIDER_ID, OllamaProvider, OllamaSetupError};
@@ -37,6 +37,7 @@ fn request(model_id: &str) -> AiCompletionRequest {
         model_id: model_id.into(),
         system_prompt: "Be concise.".into(),
         user_prompt: "Answer locally.".into(),
+        prior_messages: Vec::new(),
         parameters: AiCompletionParameters::default(),
     }
 }
@@ -135,6 +136,33 @@ fn refuses_a_request_addressed_to_another_provider() {
         provider_error(terminal).category,
         AiProviderErrorCategory::RejectedRequest
     );
+}
+
+/// `/api/generate` carries one prompt, and this adapter does not yet build a
+/// conversation or forward a token ceiling. Refusing is the point: a silently
+/// dropped history would answer without context the caller believed it sent.
+#[test]
+fn refuses_rather_than_drops_a_conversation_or_a_token_ceiling() {
+    let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+    let mut sink = RecordingSink::default();
+
+    let mut with_history = request("gemma3:4b");
+    with_history.prior_messages = vec![AiMessage::user("earlier question")];
+    assert_eq!(
+        provider_error(provider(&base).complete(&with_history, &AiCancellation::new(), &mut sink))
+            .category,
+        AiProviderErrorCategory::RejectedRequest
+    );
+
+    let mut with_ceiling = request("gemma3:4b");
+    with_ceiling.parameters.max_output_tokens = Some(1800);
+    assert_eq!(
+        provider_error(provider(&base).complete(&with_ceiling, &AiCancellation::new(), &mut sink))
+            .category,
+        AiProviderErrorCategory::RejectedRequest
+    );
+
+    assert!(server.join().expect("server").is_none(), "no socket opened");
 }
 
 #[test]

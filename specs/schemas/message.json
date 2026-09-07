@@ -1,0 +1,39 @@
+{
+  "$defs": {
+    "AiMessageRole": {
+      "description": "Who produced a conversation turn.\n\nClosed on the wire, and deliberately without a `system` value: the system\ninstruction is [`AiCompletionRequest::system_prompt`], so a conversation\ncannot carry a second, competing instruction channel.",
+      "oneOf": [
+        {
+          "const": "user",
+          "description": "A turn from the person.",
+          "type": "string"
+        },
+        {
+          "const": "assistant",
+          "description": "A turn the model previously produced.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://schemas.ai-sdk.local/0.2.0/message.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One turn of conversation preceding the final user prompt.\n\nText only. Content parts, tool calls, attachments and names are absent\nuntil a consumer needs them; see `docs/contracts.md` §4.1.",
+  "properties": {
+    "content": {
+      "description": "Turn text. Never empty.",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/AiMessageRole",
+      "description": "Who produced this turn."
+    }
+  },
+  "required": [
+    "role",
+    "content"
+  ],
+  "title": "AiMessage",
+  "type": "object"
+}

@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 use ai_core::{
     AiCompletionDelta, AiCompletionEvent, AiCompletionParameters, AiCompletionRequest,
-    AiCompletionTerminal, AiProviderError, AiProviderErrorCategory, AiRecoveryAction, AiUsage,
-    AiValidationError, MAX_AI_DELTA_BYTES, MAX_AI_ERROR_MESSAGE_BYTES, MAX_AI_IDENTIFIER_BYTES,
-    MAX_AI_PROMPT_BYTES,
+    AiCompletionTerminal, AiMessage, AiMessageRole, AiProviderError, AiProviderErrorCategory,
+    AiRecoveryAction, AiUsage, AiValidationError, MAX_AI_DELTA_BYTES, MAX_AI_ERROR_MESSAGE_BYTES,
+    MAX_AI_IDENTIFIER_BYTES, MAX_AI_OUTPUT_TOKENS, MAX_AI_PRIOR_MESSAGES, MAX_AI_PROMPT_BYTES,
 };
 use serde_json::{Value, json};
 
@@ -25,6 +25,7 @@ fn request() -> AiCompletionRequest {
         model_id: "model:small".into(),
         system_prompt: "system".into(),
         user_prompt: "user".into(),
+        prior_messages: Vec::new(),
         parameters: AiCompletionParameters::default(),
     }
 }
@@ -50,6 +51,7 @@ fn default_parameters_match_the_source_defaults() {
             retry_count: 0,
             temperature_millis: None,
             top_p_millis: None,
+            max_output_tokens: None,
         }
     );
 }
@@ -297,6 +299,7 @@ fn every_valid_request_fixture_decodes_and_validates() {
     for name in [
         "valid/completion-request.json",
         "valid/completion-request-empty-prompts.json",
+        "valid/completion-request-conversation.json",
     ] {
         let value = fixture(name);
         let decoded: AiCompletionRequest = serde_json::from_value(value.clone())
@@ -339,6 +342,9 @@ fn every_invalid_request_fixture_is_rejected_on_decode() {
         "invalid/request-unknown-nested-field.json",
         "invalid/request-missing-field.json",
         "invalid/request-snake-case-field.json",
+        "invalid/request-message-unknown-role.json",
+        "invalid/request-message-unknown-field.json",
+        "invalid/request-message-missing-content.json",
     ] {
         let value = fixture(name);
         assert!(
@@ -346,6 +352,119 @@ fn every_invalid_request_fixture_is_rejected_on_decode() {
             "{name} should be rejected"
         );
     }
+}
+
+#[test]
+fn a_pre_delta_request_still_decodes_to_the_defaults() {
+    let value = fixture("valid/completion-request-legacy-omitted.json");
+    assert!(!value.as_object().unwrap().contains_key("priorMessages"));
+    let decoded: AiCompletionRequest = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded.prior_messages, Vec::new());
+    assert_eq!(decoded.parameters.max_output_tokens, None);
+    assert_eq!(decoded.validate(), Ok(()));
+}
+
+#[test]
+fn emits_the_delta_fields_rather_than_omitting_them() {
+    let value = serde_json::to_value(request()).unwrap();
+    let object = value.as_object().unwrap();
+    assert_eq!(object["priorMessages"], json!([]));
+    assert_eq!(object["parameters"]["maxOutputTokens"], Value::Null);
+}
+
+#[test]
+fn conversation_order_is_prior_messages_then_the_user_prompt() {
+    let decoded: AiCompletionRequest =
+        serde_json::from_value(fixture("valid/completion-request-conversation.json")).unwrap();
+    assert_eq!(
+        decoded.prior_messages,
+        vec![
+            AiMessage::user("Name a colour."),
+            AiMessage::assistant("Blue."),
+        ]
+    );
+    assert_eq!(decoded.user_prompt, "And in Dutch?");
+    assert_eq!(decoded.parameters.max_output_tokens, Some(1800));
+}
+
+#[test]
+fn message_roles_serialize_in_snake_case_and_exclude_system() {
+    assert_eq!(
+        serde_json::to_value(AiMessageRole::Assistant).unwrap(),
+        json!("assistant")
+    );
+    assert!(serde_json::from_value::<AiMessageRole>(json!("system")).is_err());
+}
+
+#[test]
+fn rejects_an_empty_message_but_accepts_an_empty_user_prompt() {
+    let mut request = request();
+    request.user_prompt = String::new();
+    request.prior_messages = vec![AiMessage::user(String::new())];
+    assert_eq!(
+        request.validate(),
+        Err(AiValidationError::Empty {
+            field: "message content"
+        })
+    );
+    request.prior_messages = vec![AiMessage::user("still here")];
+    assert_eq!(request.validate(), Ok(()));
+}
+
+#[test]
+fn the_prompt_budget_spans_the_conversation_not_each_turn() {
+    let half = MAX_AI_PROMPT_BYTES / 2;
+    let mut request = request();
+    request.system_prompt = String::new();
+    request.user_prompt = "x".repeat(half);
+    request.prior_messages = vec![AiMessage::user("y".repeat(half))];
+    assert_eq!(request.validate(), Ok(()));
+
+    request.prior_messages.push(AiMessage::assistant("z"));
+    assert_eq!(
+        request.validate(),
+        Err(AiValidationError::PromptTooLong {
+            maximum: MAX_AI_PROMPT_BYTES
+        })
+    );
+}
+
+#[test]
+fn bounds_the_number_of_prior_messages() {
+    let mut request = request();
+    request.prior_messages = vec![AiMessage::user("turn"); MAX_AI_PRIOR_MESSAGES];
+    assert_eq!(request.validate(), Ok(()));
+
+    request.prior_messages.push(AiMessage::user("turn"));
+    assert_eq!(
+        request.validate(),
+        Err(AiValidationError::TooManyMessages {
+            maximum: MAX_AI_PRIOR_MESSAGES
+        })
+    );
+}
+
+#[test]
+fn accepts_consecutive_turns_from_the_same_role() {
+    let mut request = request();
+    request.prior_messages = vec![AiMessage::user("first"), AiMessage::user("second")];
+    assert_eq!(request.validate(), Ok(()));
+}
+
+#[test]
+fn rejects_zero_and_oversized_output_token_limits() {
+    let mut parameters = AiCompletionParameters::default();
+    for tokens in [0, MAX_AI_OUTPUT_TOKENS + 1] {
+        parameters.max_output_tokens = Some(tokens);
+        assert_eq!(
+            parameters.validate(),
+            Err(AiValidationError::InvalidOutputTokenLimit {
+                maximum: MAX_AI_OUTPUT_TOKENS
+            })
+        );
+    }
+    parameters.max_output_tokens = Some(MAX_AI_OUTPUT_TOKENS);
+    assert_eq!(parameters.validate(), Ok(()));
 }
 
 #[test]

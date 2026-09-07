@@ -1,0 +1,20 @@
+{
+  "description": "Off-contract output is caught in both languages. The diagnostic copy differs and is not compared.",
+  "script": {
+    "segments": [
+      "good"
+    ],
+    "outcome": {
+      "type": "malformed_output"
+    }
+  },
+  "deltas": [
+    "good"
+  ],
+  "terminal": {
+    "type": "provider_error",
+    "error": {
+      "category": "malformed_response"
+    }
+  }
+}

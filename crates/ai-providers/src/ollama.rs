@@ -102,7 +102,10 @@ impl AiComplete for OllamaProvider {
         cancellation: &AiCancellation,
         sink: &mut dyn AiEventSink,
     ) -> AiCompletionTerminal {
-        if request.validate().is_err() || request.provider_id != OLLAMA_PROVIDER_ID {
+        if request.validate().is_err()
+            || request.provider_id != OLLAMA_PROVIDER_ID
+            || crate::unsupported::carries_untransmitted_fields(request)
+        {
             return self.error(
                 AiProviderErrorCategory::RejectedRequest,
                 "Ollama completion request is invalid",

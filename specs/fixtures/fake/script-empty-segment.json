@@ -1,0 +1,22 @@
+{
+  "description": "An empty delta is accepted and still consumes a sequence number.",
+  "script": {
+    "segments": [
+      "a",
+      "",
+      "b"
+    ],
+    "outcome": {
+      "type": "done"
+    }
+  },
+  "deltas": [
+    "a",
+    "",
+    "b"
+  ],
+  "terminal": {
+    "type": "done",
+    "usage": null
+  }
+}

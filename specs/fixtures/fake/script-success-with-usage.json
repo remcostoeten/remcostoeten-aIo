@@ -1,0 +1,25 @@
+{
+  "description": "Provider-reported usage reaches the terminal unchanged.",
+  "script": {
+    "segments": [
+      "ok"
+    ],
+    "outcome": {
+      "type": "done",
+      "usage": {
+        "inputTokens": 7,
+        "outputTokens": 1
+      }
+    }
+  },
+  "deltas": [
+    "ok"
+  ],
+  "terminal": {
+    "type": "done",
+    "usage": {
+      "inputTokens": 7,
+      "outputTokens": 1
+    }
+  }
+}

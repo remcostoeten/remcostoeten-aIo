@@ -1,0 +1,20 @@
+{
+  "description": "Multi-byte text survives both languages' byte accounting.",
+  "script": {
+    "segments": [
+      "héllo ",
+      "wörld 🙂"
+    ],
+    "outcome": {
+      "type": "done"
+    }
+  },
+  "deltas": [
+    "héllo ",
+    "wörld 🙂"
+  ],
+  "terminal": {
+    "type": "done",
+    "usage": null
+  }
+}

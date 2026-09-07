@@ -27,6 +27,7 @@ pub fn request(request_id: &str) -> AiCompletionRequest {
         model_id: "model:small".into(),
         system_prompt: "system".into(),
         user_prompt: "user".into(),
+        prior_messages: Vec::new(),
         parameters: AiCompletionParameters::default(),
     }
 }

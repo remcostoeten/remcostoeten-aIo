@@ -501,6 +501,7 @@ impl AiComplete for RemoteAiProvider {
         if request.validate().is_err()
             || request.provider_id != self.kind.id()
             || !self.supports_model(&request.model_id)
+            || crate::unsupported::carries_untransmitted_fields(request)
         {
             return AiCompletionTerminal::ProviderError(self.error(
                 AiProviderErrorCategory::RejectedRequest,

@@ -57,6 +57,8 @@ mod listing;
 
 #[cfg(any(feature = "ollama", feature = "remote"))]
 mod http;
+#[cfg(any(feature = "ollama", feature = "remote"))]
+mod unsupported;
 
 #[cfg(feature = "ollama")]
 mod ollama;

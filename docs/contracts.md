@@ -1,6 +1,8 @@
 # Contracts: extraction baseline and deferred designs
 
-Status: Phase 0 closed 2026-09-06. No production code is authorized until Phase 1 is explicitly approved. Sections 1–3 describe the Phase 1 extraction baseline, its known gaps, and the two selected lifecycle/recording decisions. Section 4 constrains later design; it is not a Phase 1 implementation list. The selection rationale is in `architecture.md` §5.
+Status: sections 1–3 describe the Phase 1 extraction baseline (spec 0.1.0), its known gaps, and the two selected lifecycle/recording decisions. Section 4 constrains later design; it is not an implementation list. The selection rationale is in `architecture.md` §5.
+
+**Spec 0.2.0 amends §§1, 2.1 and 2.2.** ADR 0004 added `priorMessages` to the request and `maxOutputTokens` to the parameters, both defaulted; the combined prompt budget now spans the history. The amendments are marked inline below. Everything else in this document is unchanged, and the TypeScript implementation of the same contracts is inventoried in `typescript-core.md`.
 
 Pseudocode uses records and tagged unions. Wire fields are camelCase; tags and bounded string enums are snake_case. Keep existing Rust public names initially to minimize re-export changes. Names shortened below are conceptual, not a requirement to rename every source type.
 
@@ -11,7 +13,7 @@ Source: Skriuw `crates/skriuw-domain/src/ai.rs`, constants and validation functi
 | Quantity | Existing rule to preserve |
 | --- | --- |
 | Identifier | Non-empty, at most 128 UTF-8 bytes, ASCII letters/digits or `- _ . : /` |
-| Prompt | Combined system/user text at most 1 MiB; either or both may be empty |
+| Prompt | Combined system/user text at most 1 MiB; either or both may be empty. **0.2.0: the budget also spans every prior message's content** |
 | Output | Requested limit 1 through 4 MiB |
 | Delta | At most 64 KiB; empty deltas are currently accepted |
 | Timeout | 1 through 300,000 milliseconds |
@@ -19,6 +21,8 @@ Source: Skriuw `crates/skriuw-domain/src/ai.rs`, constants and validation functi
 | Temperature/top-p | Nullable integers, 0 through 1,000 |
 | Error message | Non-empty, at most 1,024 UTF-8 bytes; constructor normalizes whitespace/control characters |
 | Input/output usage | Each 0 through 1,000,000,000 tokens |
+| Prior messages (0.2.0) | At most 64 turns; each content non-empty |
+| Output token limit (0.2.0) | Null, or 1 through 1,000,000 |
 
 Do not replace the identifier grammar with vendor-only lowercase ids in Phase 1. Skriuw's own test uses `provider.local/v1`. The core grammar allows `..`; provider model authority and URL construction are separate boundaries. Do not describe a validated core identifier as a safe filesystem path or unencoded URL segment.
 
@@ -38,7 +42,9 @@ CompletionParameters = {
 }
 ```
 
-Default values remain 262144, 60000, 0, null, null. Source serde also accepts missing nullable sampling fields. No stop sequences, response format, token limit, provider options, or retry implementation are added.
+Default values remain 262144, 60000, 0, null, null. Source serde also accepts missing nullable sampling fields. No stop sequences, response format, provider options, or retry implementation are added.
+
+**0.2.0 adds `maxOutputTokens: u32 | null`,** defaulting to null and accepted as omitted. It is the ceiling asked *of* the provider and is distinct from `maxOutputBytes`, which is this side's accumulation cap. A provider that ignores it has not broken the contract; the byte cap still applies. See ADR 0004.
 
 ### 2.2 CompletionRequest
 
@@ -55,7 +61,9 @@ CompletionRequest = {
 
 Every non-nullable field is required. Unknown fields are rejected, including nested parameters. `origin` remains a separate argument to the service and is never sent to a provider in the request. Skriuw validates origin at its command boundary; extraction must not silently move or change that policy.
 
-This is already provider-neutral. A nested `ModelRef` and `messages` are useful later for multi-turn consumers, but are breaking wire changes rather than prerequisites for extraction.
+This is already provider-neutral. A nested `ModelRef` remains a later, breaking wire change.
+
+**0.2.0 adds `priorMessages: Message[]`,** defaulting to empty and accepted as omitted, where `Message = {role: user | assistant, content: string}`. The conversation a provider receives is `systemPrompt`, then `priorMessages` in order, then `userPrompt` as the final user turn — `userPrompt` remains the sole authority for that turn, and `role` has no `system` value. No alternation rule is imposed. The full rationale, bounds, fixtures and migration are in ADR 0004; the messages-only request shape it declined is still available as its own later gate.
 
 ### 2.3 CompletionDelta and Usage
 

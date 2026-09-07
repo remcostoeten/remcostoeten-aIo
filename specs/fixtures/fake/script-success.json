@@ -1,0 +1,22 @@
+{
+  "description": "Segmentation is the script's, not the transport's.",
+  "script": {
+    "segments": [
+      "hel",
+      "lo ",
+      "world"
+    ],
+    "outcome": {
+      "type": "done"
+    }
+  },
+  "deltas": [
+    "hel",
+    "lo ",
+    "world"
+  ],
+  "terminal": {
+    "type": "done",
+    "usage": null
+  }
+}

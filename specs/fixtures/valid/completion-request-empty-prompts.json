@@ -4,11 +4,13 @@
   "modelId": "model",
   "systemPrompt": "",
   "userPrompt": "",
+  "priorMessages": [],
   "parameters": {
     "maxOutputBytes": 1,
     "timeoutMs": 1,
     "retryCount": 2,
     "temperatureMillis": 1000,
-    "topPMillis": 0
+    "topPMillis": 0,
+    "maxOutputTokens": null
   }
 }

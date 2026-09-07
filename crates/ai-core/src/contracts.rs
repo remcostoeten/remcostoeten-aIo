@@ -16,8 +16,16 @@ use thiserror::Error;
 
 /// Maximum length of any identifier field, in UTF-8 bytes.
 pub const MAX_AI_IDENTIFIER_BYTES: usize = 128;
-/// Maximum combined system and user prompt size, in UTF-8 bytes.
+/// Maximum combined prompt size, in UTF-8 bytes.
+///
+/// Since spec 0.2.0 this budget spans the system prompt, every prior message's
+/// content, and the final user prompt together. Before the history delta it
+/// covered only the two prompts.
 pub const MAX_AI_PROMPT_BYTES: usize = 1024 * 1024;
+/// Maximum number of conversation turns preceding the final user prompt.
+pub const MAX_AI_PRIOR_MESSAGES: usize = 64;
+/// Maximum accepted value for a requested output token limit.
+pub const MAX_AI_OUTPUT_TOKENS: u32 = 1_000_000;
 /// Hard ceiling on accumulated response bytes, independent of the request.
 pub const MAX_AI_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum size of a single delta, in UTF-8 bytes.
@@ -96,6 +104,83 @@ pub enum AiValidationError {
         /// The count budget that was exceeded.
         maximum: u64,
     },
+    /// The conversation carried more turns than [`MAX_AI_PRIOR_MESSAGES`].
+    #[error("prior messages exceed {maximum} turns")]
+    TooManyMessages {
+        /// The turn budget that was exceeded.
+        maximum: usize,
+    },
+    /// A requested output token limit was zero or above
+    /// [`MAX_AI_OUTPUT_TOKENS`].
+    #[error("maximum output tokens must be between 1 and {maximum}")]
+    InvalidOutputTokenLimit {
+        /// The token budget that was exceeded.
+        maximum: u32,
+    },
+}
+
+/// Who produced a conversation turn.
+///
+/// Closed on the wire, and deliberately without a `system` value: the system
+/// instruction is [`AiCompletionRequest::system_prompt`], so a conversation
+/// cannot carry a second, competing instruction channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMessageRole {
+    /// A turn from the person.
+    User,
+    /// A turn the model previously produced.
+    Assistant,
+}
+
+/// One turn of conversation preceding the final user prompt.
+///
+/// Text only. Content parts, tool calls, attachments and names are absent
+/// until a consumer needs them; see `docs/contracts.md` §4.1.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AiMessage {
+    /// Who produced this turn.
+    pub role: AiMessageRole,
+    /// Turn text. Never empty.
+    pub content: String,
+}
+
+impl AiMessage {
+    /// Builds a user turn.
+    #[must_use]
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: AiMessageRole::User,
+            content: content.into(),
+        }
+    }
+
+    /// Builds an assistant turn.
+    #[must_use]
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: AiMessageRole::Assistant,
+            content: content.into(),
+        }
+    }
+
+    /// Checks that the turn carries text.
+    ///
+    /// The combined prompt budget spans every turn together and is therefore
+    /// checked by [`AiCompletionRequest::validate`], not here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AiValidationError::Empty`] for empty content.
+    pub fn validate(&self) -> Result<(), AiValidationError> {
+        if self.content.is_empty() {
+            return Err(AiValidationError::Empty {
+                field: "message content",
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Execution parameters for one completion.
@@ -117,6 +202,13 @@ pub struct AiCompletionParameters {
     pub temperature_millis: Option<u16>,
     /// Nucleus sampling threshold in thousandths.
     pub top_p_millis: Option<u16>,
+    /// Output token ceiling asked of the provider, or `null` for its default.
+    ///
+    /// Distinct from `max_output_bytes`, which is this side's accumulation cap
+    /// and is enforced locally. A provider that ignores this field is not a
+    /// contract violation; the byte cap still applies.
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
 }
 
 impl Default for AiCompletionParameters {
@@ -127,6 +219,7 @@ impl Default for AiCompletionParameters {
             retry_count: 0,
             temperature_millis: None,
             top_p_millis: None,
+            max_output_tokens: None,
         }
     }
 }
@@ -157,6 +250,14 @@ impl AiCompletionParameters {
         }
         validate_sampling_parameter("temperature", self.temperature_millis)?;
         validate_sampling_parameter("top p", self.top_p_millis)?;
+        if self
+            .max_output_tokens
+            .is_some_and(|tokens| tokens == 0 || tokens > MAX_AI_OUTPUT_TOKENS)
+        {
+            return Err(AiValidationError::InvalidOutputTokenLimit {
+                maximum: MAX_AI_OUTPUT_TOKENS,
+            });
+        }
         Ok(())
     }
 }
@@ -167,6 +268,12 @@ impl AiCompletionParameters {
 /// a later, breaking wire change. `origin` is deliberately absent: it is an
 /// application concept passed separately to the service and never sent to a
 /// provider.
+///
+/// The conversation a provider receives is exactly
+/// `system_prompt`, then `prior_messages` in order, then `user_prompt` as the
+/// final user turn. `user_prompt` is the sole authority for that final turn, so
+/// a consumer holding a `messages` array sends everything but its last entry as
+/// `prior_messages`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AiCompletionRequest {
@@ -178,8 +285,15 @@ pub struct AiCompletionRequest {
     pub model_id: String,
     /// May be empty.
     pub system_prompt: String,
-    /// May be empty.
+    /// The final user turn. May be empty.
     pub user_prompt: String,
+    /// Turns preceding `user_prompt`, oldest first. Omission means none.
+    ///
+    /// No alternation rule is imposed: whether consecutive same-role turns are
+    /// meaningful is the consuming application's judgement, and providers
+    /// differ on it.
+    #[serde(default)]
+    pub prior_messages: Vec<AiMessage>,
     /// Execution parameters.
     pub parameters: AiCompletionParameters,
 }
@@ -194,10 +308,19 @@ impl AiCompletionRequest {
         validate_identifier("request id", &self.request_id)?;
         validate_identifier("provider id", &self.provider_id)?;
         validate_identifier("model id", &self.model_id)?;
-        let prompt_bytes = self
+        if self.prior_messages.len() > MAX_AI_PRIOR_MESSAGES {
+            return Err(AiValidationError::TooManyMessages {
+                maximum: MAX_AI_PRIOR_MESSAGES,
+            });
+        }
+        let mut prompt_bytes = self
             .system_prompt
             .len()
             .saturating_add(self.user_prompt.len());
+        for message in &self.prior_messages {
+            message.validate()?;
+            prompt_bytes = prompt_bytes.saturating_add(message.content.len());
+        }
         if prompt_bytes > MAX_AI_PROMPT_BYTES {
             return Err(AiValidationError::PromptTooLong {
                 maximum: MAX_AI_PROMPT_BYTES,

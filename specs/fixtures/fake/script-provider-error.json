@@ -1,0 +1,22 @@
+{
+  "description": "A scripted error travels whole: the script fixed its message and recovery action.",
+  "script": {
+    "segments": [],
+    "outcome": {
+      "type": "provider_error",
+      "category": "rate_limited",
+      "message": "slow down",
+      "recoveryAction": "retry"
+    }
+  },
+  "deltas": [],
+  "terminal": {
+    "type": "provider_error",
+    "error": {
+      "providerId": "fake",
+      "category": "rate_limited",
+      "message": "slow down",
+      "recoveryAction": "retry"
+    }
+  }
+}
