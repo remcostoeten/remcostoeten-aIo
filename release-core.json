@@ -1,0 +1,10 @@
+{
+  "releaseBranch": "master",
+  "remote": "origin",
+  "versionFile": "packages/core/package.json",
+  "tagPrefix": "ai-v",
+  "commitMessage": "chore(release): ai-core {{version}}",
+  "tagMessage": "{{version}}",
+  "npm": { "publish": true, "access": "public", "tag": null },
+  "github": { "release": true, "draft": false }
+}

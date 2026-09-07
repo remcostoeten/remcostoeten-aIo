@@ -1,0 +1,10 @@
+{
+  "releaseBranch": "master",
+  "remote": "origin",
+  "versionFile": "packages/ai-sdk/package.json",
+  "tagPrefix": "ai-sdk-v",
+  "commitMessage": "chore(release): ai-sdk {{version}}",
+  "tagMessage": "{{version}}",
+  "npm": { "publish": true, "access": "public", "tag": null },
+  "github": { "release": true, "draft": false }
+}
