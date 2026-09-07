@@ -14,7 +14,7 @@
  */
 
 import { streamText, type LanguageModel, type ModelMessage } from 'ai'
-import type { CompletionProvider, CompletionRequest, CompletionTerminal, Usage } from '@ai-sdk-local/core'
+import type { CompletionProvider, CompletionRequest, CompletionTerminal, Usage } from '@remcostoeten/ai-core'
 
 import { credentialError, toProviderError, unauthorizedModelError } from './errors.js'
 import type { CredentialSource, ModelAuthority } from './ports.js'

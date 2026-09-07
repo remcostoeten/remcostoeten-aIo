@@ -92,7 +92,7 @@ describe('the adapter is server code, and says so', () => {
       peerDependenciesMeta: Record<string, { optional: boolean }>
     }
 
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(['@ai-sdk-local/core', 'ai'])
+    expect(Object.keys(manifest.dependencies).sort()).toEqual(['@remcostoeten/ai-core', 'ai'])
     for (const vendor of Object.keys(manifest.peerDependencies)) {
       expect(manifest.peerDependenciesMeta[vendor]?.optional).toBe(true)
     }

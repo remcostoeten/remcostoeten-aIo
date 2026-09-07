@@ -7,7 +7,7 @@
  * that imports this pulls in nothing else.
  *
  * ```ts
- * import { createFakeProvider, createRuntime, consumeEvents, buildRequest, successScript } from '@ai-sdk-local/core'
+ * import { createFakeProvider, createRuntime, consumeEvents, buildRequest, successScript } from '@remcostoeten/ai-core'
  *
  * const runtime = createRuntime({ providers: [createFakeProvider(successScript(['hel', 'lo']))] })
  * const built = buildRequest({

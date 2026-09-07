@@ -12,7 +12,7 @@
  */
 
 import { APICallError, InvalidPromptError, LoadAPIKeyError, NoSuchModelError, TypeValidationError } from 'ai'
-import { providerError, type ProviderError, type ProviderErrorCategory, type RecoveryAction } from '@ai-sdk-local/core'
+import { providerError, type ProviderError, type ProviderErrorCategory, type RecoveryAction } from '@remcostoeten/ai-core'
 
 import type { CredentialRefusal } from './ports.js'
 

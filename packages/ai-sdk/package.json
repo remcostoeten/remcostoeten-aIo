@@ -1,8 +1,14 @@
 {
-  "name": "@ai-sdk-local/ai-sdk",
+  "name": "@remcostoeten/ai-sdk",
   "version": "0.2.0",
+  "description": "Vercel AI SDK adapter and typed provider factories for the @remcostoeten/ai-core completion seam.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/remcostoeten/remcostoeten-aIo.git",
+    "directory": "packages/ai-sdk"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
@@ -15,8 +21,11 @@
     "dist",
     "src"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@ai-sdk-local/core": "workspace:*",
+    "@remcostoeten/ai-core": "^0.2.0",
     "ai": "^7"
   },
   "peerDependencies": {

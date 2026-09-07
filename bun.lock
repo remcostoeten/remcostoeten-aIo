@@ -14,17 +14,17 @@
       },
     },
     "packages/ai-sdk": {
-      "name": "@ai-sdk-local/ai-sdk",
+      "name": "@remcostoeten/ai-sdk",
       "version": "0.2.0",
       "dependencies": {
-        "@ai-sdk-local/core": "workspace:*",
+        "@remcostoeten/ai-core": "workspace:*",
         "ai": "^7",
       },
       "peerDependencies": {
-        "@ai-sdk/anthropic": "",
-        "@ai-sdk/google": "",
-        "@ai-sdk/groq": "",
-        "@ai-sdk/openai-compatible": "",
+        "@ai-sdk/anthropic": "^4",
+        "@ai-sdk/google": "^4",
+        "@ai-sdk/groq": "^4",
+        "@ai-sdk/openai-compatible": "^3",
       },
       "optionalPeers": [
         "@ai-sdk/anthropic",
@@ -34,15 +34,11 @@
       ],
     },
     "packages/core": {
-      "name": "@ai-sdk-local/core",
+      "name": "@remcostoeten/ai-core",
       "version": "0.2.0",
     },
   },
   "packages": {
-    "@ai-sdk-local/ai-sdk": ["@ai-sdk-local/ai-sdk@workspace:packages/ai-sdk"],
-
-    "@ai-sdk-local/core": ["@ai-sdk-local/core@workspace:packages/core"],
-
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@4.0.49", "", { "dependencies": { "@ai-sdk/provider": "4.0.10", "@ai-sdk/provider-utils": "5.0.36" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-fzy2sLrs3vNsliIgx65fuovsa6a7OTXd6DllKUgLuVmPyqLnvoZCv9NlKgq+krzDzSxLb9d0zTaJJpsjBVLNyA=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.75", "", { "dependencies": { "@ai-sdk/provider": "4.0.10", "@ai-sdk/provider-utils": "5.0.36", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-HOnhw3oXtBnboBF7kAKipjToCN6+5w6EuukiUKiULcxBitS+vbHRRv9IUBcq+Z1wkXcJjfywKrt5r++I6OYyXg=="],
@@ -56,6 +52,10 @@
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.10", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-fX2ENAc7iDpZ+Wp4+Rk06Usn/Ys7dI9uAkGv0jlF6XVrW13NkRWx5Ou+U6lIM2E1fTLkCs16GGrUAaVvroag7A=="],
 
     "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@5.0.36", "", { "dependencies": { "@ai-sdk/provider": "4.0.10", "@standard-schema/spec": "^1.1.0", "@workflow/serde": "4.1.0", "eventsource-parser": "^3.0.8", "undici": "^7.29.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-MFXBn6XDyf37PNQAge/HTatPJE8Vmg/g/w4WPtjSV53jq8FKAzoaN5+43hsdQa9bqgN+/13jxug9ChvsG+godQ=="],
+
+    "@remcostoeten/ai-core": ["@remcostoeten/ai-core@workspace:packages/core"],
+
+    "@remcostoeten/ai-sdk": ["@remcostoeten/ai-sdk@workspace:packages/ai-sdk"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 

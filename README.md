@@ -6,7 +6,7 @@ The SDK owns completion execution. Applications own context, prompts, consent, p
 
 ## Status
 
-**Phases 0 through 4 complete. Phase 5 has not begun and is not authorized.**
+**Phases 0 through 5 complete. Phase 6 has not begun and is not authorized.**
 
 Spec version 0.2.0. Four units exist:
 
@@ -14,12 +14,12 @@ Spec version 0.2.0. Four units exist:
 | --- | --- |
 | `crates/ai-core` | Rust completion contracts, ports, service, deterministic fake, recorder port |
 | `crates/ai-providers` | Seven remote descriptors, the Gemini dialect, Ollama generation, credential and model-authority ports |
-| `packages/core` | The same contracts, run lifecycle, event consumer, NDJSON helpers and fake in TypeScript — zero dependencies |
-| `packages/ai-sdk` | The Vercel AI SDK adapter and typed provider factories |
+| `packages/core` (`@remcostoeten/ai-core`) | The same contracts, run lifecycle, event consumer, NDJSON helpers and fake in TypeScript — zero dependencies |
+| `packages/ai-sdk` (`@remcostoeten/ai-sdk`) | The Vercel AI SDK adapter and typed provider factories |
 
 `./scripts/check.sh` runs everything: 148 Rust tests, 122 TypeScript tests, clippy, fmt and the schema drift check. No step needs a network, a provider key, or a sibling checkout.
 
-Skriuw runs on the Rust crates ([integration notes](docs/integration-skriuw.md)); nothing in Dora or Betalingen has been modified. Distribution is unresolved for both languages — the crates are path dependencies and the packages are workspace-only.
+Skriuw runs on the Rust crates ([integration notes](docs/integration-skriuw.md)) and Betalingen on the TypeScript packages ([integration notes](docs/integration-betalingen.md)); nothing in Dora has been modified. Distribution is decided ([ADR 0005](docs/decisions/0005-distribution.md)) but not executed: nothing is published, so the crates are still path dependencies and Betalingen resolves the packages through local paths and cannot deploy.
 
 ## Evidence
 
@@ -36,8 +36,8 @@ The requested `ai-sdk-architecture-research.md` does not exist in this checkout.
 A validated request goes in; ordered deltas and exactly one terminal come out. The SDK knows nothing about products, prompts, persistence or UI.
 
 ```ts
-import { buildRequest, consumeEvents, createRuntime } from '@ai-sdk-local/core'
-import { createGroqProvider, staticCredential } from '@ai-sdk-local/ai-sdk'
+import { buildRequest, consumeEvents, createRuntime } from '@remcostoeten/ai-core'
+import { createGroqProvider, staticCredential } from '@remcostoeten/ai-sdk'
 
 const provider = await createGroqProvider({
   credentials: staticCredential(serverSideKey),

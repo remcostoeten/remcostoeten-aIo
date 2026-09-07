@@ -1,8 +1,14 @@
 {
-  "name": "@ai-sdk-local/core",
+  "name": "@remcostoeten/ai-core",
   "version": "0.2.0",
+  "description": "Provider-neutral AI completion contracts, run lifecycle, and deterministic fake provider. Zero dependencies.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/remcostoeten/remcostoeten-aIo.git",
+    "directory": "packages/core"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
@@ -12,5 +18,8 @@
     }
   },
   "files": ["dist", "src"],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {}
 }

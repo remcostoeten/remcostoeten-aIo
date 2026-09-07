@@ -189,15 +189,18 @@ refuse both, see ADR 0004.
 
 ## Unresolved
 
-**Distribution.** The Rust crates are still consumed as path dependencies into a
-sibling checkout, and the TypeScript packages are workspace-only: neither is
-published, and `@ai-sdk-local/*` is a placeholder scope. This was already the
-open question at the end of Phase 3 and Phase 4 did not answer it.
+**Distribution channels are decided; the two publishing acts are not done.**
+ADR 0005 settles it after Phase 4 closed: Rust ships as a tagged git dependency,
+TypeScript as `@remcostoeten/ai-core` and `@remcostoeten/ai-sdk` on npm. The
+packages carry those names now. Nothing has been published and the `ai-v0.2.0`
+tag has not been pushed, so a consumer outside this workspace still cannot
+install either unit.
 
-**Skriuw does not build against 0.2.0.** ADR 0004's Rust source break needs
-seven one-line edits in Skriuw, which requires its own authorization. Nothing in
-this repository depends on that, but the Phase 3 integration proof is pinned to
-0.1.0 until it happens.
+**Skriuw builds against 0.2.0 again.** ADR 0004's Rust source break was fixed in
+Skriuw on 2026-09-07 under its own authorization: `prior_messages: Vec::new()`
+at six request literals plus the regenerated
+`contracts/generated/ai-completion-request.schema.json`. Skriuw still consumes
+the crates by path, not by the tag ADR 0005 chose.
 
 **No live-provider check exists.** Every test here runs against a fixture
 `fetch`. That is deliberate and it is also a gap: nothing has confirmed that the

@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from 'bun:test'
 
-import { consumeEvents, createRuntime, defaultParameters, type CompletionRequest } from '@ai-sdk-local/core'
+import { consumeEvents, createRuntime, defaultParameters, type CompletionRequest } from '@remcostoeten/ai-core'
 
 import { createGroqProvider, permitAll, staticCredential, type CredentialSource, type ModelAuthority } from '../src/index.ts'
 import { createAdapter } from '../src/adapter.ts'

@@ -27,15 +27,15 @@ The two languages implement the same seam rather than sharing an implementation:
 
 ## TypeScript
 
-`@ai-sdk-local/core` has no dependencies: a browser consumer that imports it pulls in nothing else. `@ai-sdk-local/ai-sdk` adds the Vercel AI SDK and the vendor package for whichever factory is called, so it belongs on a server.
+`@remcostoeten/ai-core` has no dependencies: a browser consumer that imports it pulls in nothing else. `@remcostoeten/ai-sdk` adds the Vercel AI SDK and the vendor package for whichever factory is called, so it belongs on a server.
 
 Both are workspace packages. There is no published release channel yet, so a consumer in this repository depends on them through the Bun workspace:
 
 ```json
 {
   "dependencies": {
-    "@ai-sdk-local/core": "workspace:*",
-    "@ai-sdk-local/ai-sdk": "workspace:*"
+    "@remcostoeten/ai-core": "workspace:*",
+    "@remcostoeten/ai-sdk": "workspace:*"
   }
 }
 ```
@@ -45,7 +45,7 @@ Both are workspace packages. There is no published release channel yet, so a con
 The fake ships in core, needs no key and no network, and produces the same segmentation every time — which is what makes an application's own tests deterministic.
 
 ```ts
-import { buildRequest, consumeEvents, createFakeProvider, createRuntime, successScript } from '@ai-sdk-local/core'
+import { buildRequest, consumeEvents, createFakeProvider, createRuntime, successScript } from '@remcostoeten/ai-core'
 
 const runtime = createRuntime({
   providers: [createFakeProvider(successScript(['Blue', ' and', ' green.']))],
@@ -75,8 +75,8 @@ Both results are discriminated unions, so a request that never ran cannot be mis
 Two ports have no defaults, deliberately. `models` decides which model ids this application permits; `credentials` produces the key. Both are consulted before a socket is opened, so an unauthorized model or an unconfigured provider fails without any network access.
 
 ```ts
-import { createRuntime } from '@ai-sdk-local/core'
-import { createGroqProvider, staticCredential } from '@ai-sdk-local/ai-sdk'
+import { createRuntime } from '@remcostoeten/ai-core'
+import { createGroqProvider, staticCredential } from '@remcostoeten/ai-sdk'
 
 const PERMITTED = new Set(['llama-3.3-70b-versatile'])
 
@@ -91,7 +91,7 @@ const runtime = createRuntime({ providers: [provider] })
 `createGeminiProvider` and `createAnthropicProvider` take the same options. `createOpenAiCompatibleProvider` additionally requires a `providerId` and a `baseURL`, because "compatible" has no default host and because two endpoints or two accounts are two providers:
 
 ```ts
-import { createOpenAiCompatibleProvider } from '@ai-sdk-local/ai-sdk'
+import { createOpenAiCompatibleProvider } from '@remcostoeten/ai-sdk'
 
 const provider = await createOpenAiCompatibleProvider({
   providerId: 'internal-gateway',
@@ -106,7 +106,7 @@ Reading `process.env` is the application's, above the SDK: nothing in either pac
 A `CredentialSource` may be async and may refuse. A refusal is a closed vocabulary — `missing` or `withheld` — and arrives at the consumer as a typed `missing_credential` or `invalid_credential` terminal, never as a thrown error:
 
 ```ts
-import type { CredentialSource } from '@ai-sdk-local/ai-sdk'
+import type { CredentialSource } from '@remcostoeten/ai-sdk'
 
 function keyring(userId: string): CredentialSource {
   return {
@@ -126,7 +126,7 @@ function keyring(userId: string): CredentialSource {
 `toNdjsonStream` turns the event stream into a `ReadableStream<Uint8Array>`, so a route is a Web `Response` and nothing more. The same function works under Hono, Next.js, a bare Worker or `Bun.serve`.
 
 ```ts
-import { buildRequest, createRuntime, defaultParameters, toNdjsonStream, type Message } from '@ai-sdk-local/core'
+import { buildRequest, createRuntime, defaultParameters, toNdjsonStream, type Message } from '@remcostoeten/ai-core'
 
 async function chatRoute(messages: readonly Message[]): Promise<Response> {
   const built = buildRequest({
@@ -169,7 +169,7 @@ Each line is one event document, exactly the shape in `specs/fixtures/valid/`:
 `fromNdjsonStream` decodes bytes back into events, validating each line; `consumeEvents` folds them into one outcome while checking the streaming invariants — one request id, sequences from zero increasing by one, at most one terminal, nothing after it.
 
 ```ts
-import { consumeEvents, fromNdjsonStream } from '@ai-sdk-local/core'
+import { consumeEvents, fromNdjsonStream } from '@remcostoeten/ai-core'
 
 const response = await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) })
 if (!response.body) throw new Error('no body')
@@ -186,7 +186,7 @@ Checking is not repair. A sequence gap is reported as a `violated` outcome, neve
 `CompletionOutcome` is a closed union, so a `switch` over it is exhaustive under `strict` TypeScript and a new state would break the build rather than fall through a default.
 
 ```ts
-import type { CompletionOutcome } from '@ai-sdk-local/core'
+import type { CompletionOutcome } from '@remcostoeten/ai-core'
 
 function present(outcome: CompletionOutcome): string {
   switch (outcome.status) {
@@ -233,7 +233,7 @@ Aborting cannot interrupt a provider wedged inside an un-abortable await. The ru
 At an HTTP or IPC boundary, `decodeRequest` proves shape and values in one step and keeps the two stages distinguishable in its rejection.
 
 ```ts
-import { decodeRequest, describeValidationError } from '@ai-sdk-local/core'
+import { decodeRequest, describeValidationError } from '@remcostoeten/ai-core'
 
 const result = decodeRequest(await request.json())
 if (!result.ok) {

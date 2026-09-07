@@ -1,14 +1,14 @@
 /**
  * Provider execution for the TypeScript core, over the Vercel AI SDK.
  *
- * `@ai-sdk-local/core` owns the contracts and the run lifecycle; this package
+ * `@remcostoeten/ai-core` owns the contracts and the run lifecycle; this package
  * owns what it takes to reach a real provider. Its whole job is that the
  * library underneath stays underneath — no `LanguageModel`, `UIMessage`,
  * `TextStreamPart` or `APICallError` appears in anything exported here.
  *
  * ```ts
- * import { createRuntime, buildRequest, consumeEvents } from '@ai-sdk-local/core'
- * import { createGroqProvider, staticCredential } from '@ai-sdk-local/ai-sdk'
+ * import { createRuntime, buildRequest, consumeEvents } from '@remcostoeten/ai-core'
+ * import { createGroqProvider, staticCredential } from '@remcostoeten/ai-sdk'
  *
  * const provider = await createGroqProvider({
  *   credentials: staticCredential(process.env.GROQ_API_KEY ?? ''),

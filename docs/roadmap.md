@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: Phases 0 through 4 complete; Phase 5 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
+Status: Phases 0 through 5 complete; Phase 6 not begun and not authorized. Each phase requires explicit approval and ends at its exit criteria. This roadmap does not authorize migrations, production code, package creation, or deployment now.
 
 The phase order follows AGENTS.md. The audit's larger package/feature list is not a required deliverable. Every phase defines a single purpose, preserves dependency direction, and records any behavior change separately.
 
@@ -121,6 +121,8 @@ Purpose: replace provider execution without changing financial context, authoriz
 With explicit authorization, adapt its route to the runtime while preserving its existing text/done/error event shape by default. A later explicit HTTP contract change can expose richer SDK events; typed categories are not required on an unchanged three-event wire. Keep server credentials and Vercel dependencies out of the browser island.
 
 Exit: existing application behaviors/tests, OpenAPI drift, build and relevant bundle checks pass. Deployment is a separate authorized action, not an implicit SDK phase requirement. Stop.
+
+**Met on 2026-09-07.** `docs/integration-betalingen.md` records the two changed files, what was preserved, what the run lifecycle adds, and what is not finished. `src/lib/ai/groq.ts` is now `createGroqProvider`/`buildRequest`/`createRuntime` instead of `createGroq`/`streamText`; `src/routes/ai.ts` changed only inside its `try` block; the three-event `text`/`done`/`error` NDJSON wire, the prompt, the source allowlist, the IBAN masking, the authorization gates and the Dutch failure message are untouched. Betalingen's 99 tests pass with its six AI tests unmodified, `tsc` and `oxlint` are clean, the OpenAPI shows no drift from this change, the esbuild bundle builds, and the browser island still carries no vendor package, key, model id or prompt. Two caveats stated rather than hidden: the packages are consumed through `file:` paths plus an `overrides` pin, so Betalingen is not deployable until ADR 0005's npm publish happens, and nothing here has touched a live Groq endpoint.
 
 ## Phase 6: extract Ollama lifecycle
 

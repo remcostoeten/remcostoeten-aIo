@@ -801,9 +801,9 @@ Adding a provider without provider fixtures should eventually fail CI.
 
 ## Current phase
 
-Phases 0 through 4 are complete. The repository holds `crates/ai-core`,
-`crates/ai-providers`, `packages/core` and `packages/ai-sdk` at spec version
-0.2.0.
+Phases 0 through 5 are complete. The repository holds `crates/ai-core`,
+`crates/ai-providers`, `packages/core` (`@remcostoeten/ai-core`) and
+`packages/ai-sdk` (`@remcostoeten/ai-sdk`) at spec version 0.2.0.
 
 Read the closing record of each phase in `docs/roadmap.md`, and the inventory
 for whichever unit you are touching:
@@ -812,11 +812,15 @@ for whichever unit you are touching:
 * `docs/extraction-inventory-providers.md` — `ai-providers`
 * `docs/integration-skriuw.md` — what Skriuw's migration cost
 * `docs/typescript-core.md` — `packages/core` and `packages/ai-sdk`
+* `docs/integration-betalingen.md` — what Betalingen's migration cost
+* `docs/decisions/0005-distribution.md` — the channels, and the publishes still pending
 
 `./scripts/check.sh` runs everything. It must stay green and it must stay
 offline: no step may need a network, a provider key, or a sibling checkout.
 
-**Phase 5 has not begun and is not authorized.** Neither has any other phase.
+**Phase 6 has not begun and is not authorized.** Neither has any other phase.
+Publishing to npm and pushing the `ai-v0.2.0` tag are separate acts that ADR
+0005 deliberately leaves unauthorized.
 
 ## Phase gates
 

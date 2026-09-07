@@ -1,113 +1,121 @@
-# Session handoff: Phase 4 is closed
+# Session handoff: Phase 5 is closed
 
 Updated: 2026-09-07.
 Workspace: `/home/remcostoeten/dev/remcostoeten-aIo`.
 
 ## State
 
-**Phases 0 through 4 are COMPLETE. Phase 5 has not begun and is not
-authorized.** Spec version is 0.2.0.
+**Phases 0 through 5 are COMPLETE. Phase 6 has not begun and is not
+authorized.** Spec version is 0.2.0, and the Cargo and npm versions now match
+it.
 
 Four units:
 
 - `crates/ai-core` — the Rust completion seam.
 - `crates/ai-providers` — seven remote descriptors, the Gemini dialect, Ollama
   generation, credential and model-authority ports.
-- `packages/core` — the same contracts, run lifecycle, event consumer, NDJSON
-  helpers and deterministic fake in TypeScript. Zero dependencies.
-- `packages/ai-sdk` — the Vercel AI SDK adapter and typed provider factories.
+- `packages/core`, published as **`@remcostoeten/ai-core`** — the same
+  contracts, run lifecycle, event consumer, NDJSON helpers and deterministic
+  fake in TypeScript. Zero dependencies.
+- `packages/ai-sdk`, published as **`@remcostoeten/ai-sdk`** — the Vercel AI SDK
+  adapter and typed provider factories.
+
+Both real consumers now sit on 0.2.0: Skriuw in Rust, Betalingen in TypeScript.
 
 Read before touching anything:
 
-- `docs/typescript-core.md` — what Phase 4 built, the symbol map, the six shape
-  differences between the languages, the two vendor quirks, and what is not
-  implemented.
-- `docs/decisions/0004-history-and-token-limit.md` — the contract gate that ran
-  first, and the delta it approved.
+- `docs/decisions/0005-distribution.md` — the channel decision, and the two
+  publishing acts it deliberately does **not** authorize.
+- `docs/integration-betalingen.md` — what Phase 5 changed and what it left.
+- `docs/typescript-core.md` — the symbol map, the six shape differences between
+  the languages, the two vendor quirks, and what is not implemented.
+- `docs/decisions/0004-history-and-token-limit.md` — the contract delta.
 - The earlier inventories: `docs/extraction-inventory.md`,
   `docs/extraction-inventory-providers.md`, `docs/integration-skriuw.md`.
 
 ## Verification at closure
 
-`./scripts/check.sh` is green end to end:
+`./scripts/check.sh` is green end to end: `cargo fmt --all --check` and
+`cargo clippy --all-targets --all-features -- -D warnings` clean (and clean
+again with `--no-default-features`); `cargo test --workspace --all-features`
+148 passed, 0 failed, 2 ignored (live); both schema tools pass `--check`;
+`tsc --build --force` clean under strict TypeScript with
+`noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`; `bun test packages`
+122 passed, 0 failed across 8 files. No step needs a network, a provider key, or
+a sibling checkout.
 
-- `cargo fmt --all --check` clean; `cargo clippy --all-targets --all-features
-  -- -D warnings` clean, and clean again with `--no-default-features`.
-- `cargo test --workspace --all-features`: 148 passed, 0 failed, 2 ignored
-  (live).
-- Both schema tools pass `--check`: 7 core schemas, 1 provider schema.
-- `tsc --build --force` clean under strict TypeScript with
-  `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
-- `bun test packages`: 122 passed, 0 failed, across 8 files.
+In the consumers, on 2026-09-07:
 
-No step needs a network, a provider key, or a sibling checkout.
+- **Skriuw** (`ai-sdk-phase-3-extraction`): builds against 0.2.0 again. 418
+  workspace tests and 74 desktop tests pass, `cargo fmt --check` and workspace
+  `clippy -D warnings` clean, contract drift clean after regenerating
+  `contracts/generated/ai-completion-request.schema.json`.
+- **Betalingen**: 99 tests pass, `tsc --noEmit` and `oxlint` clean, the esbuild
+  Vercel bundle builds, no OpenAPI drift from the migration, and the browser
+  island carries no vendor package, key, model id or prompt.
 
-`/home/remcostoeten/dev/{skriuw,dora,betalingen}` are untouched.
+## What this session did
 
-## What Phase 4 proved
+**Skriuw was fixed to 0.2.0.** ADR 0004's source break needed
+`prior_messages: Vec::new()` at six request literals —
+`crates/skriuw-domain/src/ai.rs`, `crates/skriuw-ai/src/lib.rs`,
+`crates/skriuw-ai-ollama/src/lib.rs` (three), `app/src-tauri/src/ai_history.rs`,
+`app/src-tauri/src/ai.rs` — plus the regenerated request schema, whose only
+change is the two additive defaulted fields and the doc text around them.
+Nothing else in Skriuw was touched. **The changes are not committed**, and they
+sit in a working tree that already held unrelated in-progress work on the vim
+editor.
 
-The two languages implement one seam, and the claim is checked rather than
-asserted. Both read `specs/fixtures/` for wire conformance. Both run the eight
-shared fake scripts in `specs/fixtures/fake/` and must agree on segmentation,
-identity, sequence, terminal kind, error category and usage — the list ADR 0002
-defines. The TypeScript suite also asserts the committed schemas match what its
-decoder accepts, so a Rust-only contract change fails on the TypeScript side.
+**Distribution was decided.** ADR 0005: Rust ships as a tagged git dependency
+(`ai-v0.2.0` on `github.com/remcostoeten/remcostoeten-aIo`), TypeScript as
+`@remcostoeten/ai-core` and `@remcostoeten/ai-sdk` on npm. crates.io was
+rejected for a stated reason — `ai-providers` is taken by an unrelated crate, so
+publishing forces a public rename for no current benefit; `ai-core` is free.
+Both npm names are free and the scope is already the owner's. The placeholder
+`@ai-sdk-local/*` scope is gone from the packages, the docs and the tests.
 
-The boundary holds. `core` bundles for the browser with no `ai`, no vendor
-package, no `process.env` and no Node built-in, and its emitted JavaScript is
-executed under real Node in the suite. `createAdapter` and `ModelFactory` are
-unexported, so no third-party type is reachable from either entry point and
-there is no `fromLanguageModel`. `maxRetries` is 0 and a 429 is attempted
-exactly once. No provider response body reaches a caller.
+**Betalingen was migrated.** See `docs/integration-betalingen.md`.
 
-The consumer shape works. `packages/ai-sdk/test/consumer-shape.test.ts` runs
-Betalingen's actual shape — a multi-turn Dutch conversation, a system prompt, a
-1800-token ceiling, NDJSON out, key on the server — end to end against a fixture
-`fetch`, and asserts the conversation reaches the provider as four turns rather
-than one flattened prompt.
+## What is still open
 
-## What it did not prove, and what it broke
+**Neither publishing act has happened.** Nothing is on npm and the `ai-v0.2.0`
+tag is not pushed. Until then: Skriuw keeps its path dependencies, and
+**Betalingen is not deployable** — it resolves the packages through `file:`
+paths plus an `overrides` pin, which Vercel cannot install from. Its import
+specifiers are already final, so the fix is a publish and a version range, not a
+code change. Publishing is outward-facing and irreversible at a version number,
+so it needs its own explicit go-ahead.
 
-**Distribution is still unresolved, now in two languages.** The crates are path
-dependencies into a sibling checkout; the packages are workspace-only under a
-placeholder `@ai-sdk-local/*` scope, unpublished. This was the open question at
-the end of Phase 3 and Phase 4 did not answer it.
-
-**Skriuw no longer builds against this version.** ADR 0004 adds two fields to
-two public Rust structs, which breaks struct-literal construction. In Skriuw
-that is six test helpers and one call site on branch
-`ai-sdk-phase-3-extraction`; adding `prior_messages: Vec::new()` and
-`max_output_tokens: None` is the entire fix. Skriuw was deliberately not
-modified — that needs its own authorization — so the Phase 3 integration proof
-is pinned to 0.1.0 until someone does it. Nothing in this repository depends on
-it.
-
-**Nothing has touched a live provider.** Every adapter test runs against a
-fixture `fetch`. That keeps the suite offline, and it also means no one has
-confirmed that Groq, Gemini or Anthropic actually behave as the fixtures claim.
+**Nothing has touched a live provider, in either language.** Every adapter test
+in this repository, in Skriuw and in Betalingen runs against a fixture `fetch`.
 Two Rust tests are `#[ignore]`d as live checks; there is no TypeScript
-equivalent.
+equivalent. No one has confirmed that Groq, Gemini or Anthropic behave as the
+fixtures claim.
+
+**Neither consumer's work is committed.** Both Skriuw's and Betalingen's
+changes sit uncommitted in working trees that already contained unrelated
+in-progress edits. In Betalingen the entire AI feature was untracked before this
+session began.
 
 Also still unresolved from earlier phases: no retries or key rotation, no
 structured output, no provider fallback or routing, no run recording in
 TypeScript, `sse_payload` is a line helper rather than an SSE decoder, and H3 (a
 Rust stream reaching the 4 MiB cap is indistinguishable from one that finished)
-still has no fixture.
+still has no fixture. The Rust adapters still refuse `priorMessages` and
+`maxOutputTokens` with a typed `rejected_request` rather than carrying them;
+wiring them is provider work for its own phase.
 
-The Rust adapters do not carry `priorMessages` or `maxOutputTokens`. They refuse
-a request containing either, with a typed `rejected_request` before any socket
-opens, rather than dropping it silently. Wiring them is provider work for its
-own phase.
+Unrelated to this SDK, noticed and not fixed: `app/src-tauri` in Skriuw has two
+pre-existing `clippy::cloned_ref_to_slice_refs` warnings in
+`src/maintenance.rs`. That crate is not in Skriuw's clippy gate, so its own
+`check.sh` does not see them.
 
 ## The next authorized boundary
 
-**Phase 5 requires an explicit instruction to begin.** Its scope is
-`docs/roadmap.md` "Phase 5": adapt Betalingen's route to the runtime while
-preserving its financial context, authorization, masking, prompts, and its
-existing three-event `text`/`done`/`error` NDJSON wire by default. Its typed SDK
-events are available but not required on an unchanged wire.
+**Phase 6 requires an explicit instruction to begin.** Its scope is
+`docs/roadmap.md` "Phase 6": extract the Ollama lifecycle into
+`ai-ollama-runtime`, only after its platform and behavior scope is approved, and
+with Skriuw's migration onto it needing separate authorization again.
 
-Two things deserve a decision before it rather than a default: how these
-packages are distributed to a consumer that is not in this workspace, and
-whether Skriuw's seven-line 0.2.0 fix should be authorized so both consumers sit
-on one version.
+Before that, the publish is the decision actually blocking something: one
+consumer cannot deploy without it.

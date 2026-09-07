@@ -10,7 +10,7 @@
  * factory is called, so a consumer that uses Groq does not ship Google's SDK.
  */
 
-import type { CompletionProvider } from '@ai-sdk-local/core'
+import type { CompletionProvider } from '@remcostoeten/ai-core'
 
 import { createAdapter, type ModelFactory } from './adapter.js'
 import { permitAll, type CredentialSource, type ModelAuthority } from './ports.js'

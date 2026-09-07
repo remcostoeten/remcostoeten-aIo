@@ -23,7 +23,7 @@ import {
   toNdjsonStream,
   type CompletionEvent,
   type Message,
-} from '@ai-sdk-local/core'
+} from '@remcostoeten/ai-core'
 
 import { createGroqProvider, staticCredential } from '../src/index.ts'
 
