@@ -29,16 +29,18 @@ The two languages implement the same seam rather than sharing an implementation:
 
 `@remcostoeten/ai-core` has no dependencies: a browser consumer that imports it pulls in nothing else. `@remcostoeten/ai-sdk` adds the Vercel AI SDK and the vendor package for whichever factory is called, so it belongs on a server.
 
-Both are workspace packages. There is no published release channel yet, so a consumer in this repository depends on them through the Bun workspace:
+Both are published on npm as of 0.2.0, so a consumer outside this repository installs them:
 
 ```json
 {
   "dependencies": {
-    "@remcostoeten/ai-core": "workspace:*",
-    "@remcostoeten/ai-sdk": "workspace:*"
+    "@remcostoeten/ai-core": "^0.2.0",
+    "@remcostoeten/ai-sdk": "^0.2.0"
   }
 }
 ```
+
+A consumer inside this repository still depends on them through the Bun workspace with `"workspace:*"`.
 
 ### Stream from the deterministic fake
 

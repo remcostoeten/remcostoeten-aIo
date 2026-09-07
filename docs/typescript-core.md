@@ -189,12 +189,11 @@ refuse both, see ADR 0004.
 
 ## Unresolved
 
-**Distribution channels are decided; the two publishing acts are not done.**
-ADR 0005 settles it after Phase 4 closed: Rust ships as a tagged git dependency,
-TypeScript as `@remcostoeten/ai-core` and `@remcostoeten/ai-sdk` on npm. The
-packages carry those names now. Nothing has been published and the `ai-v0.2.0`
-tag has not been pushed, so a consumer outside this workspace still cannot
-install either unit.
+**Distribution is decided and both publishing acts are done.** ADR 0005 settles
+the channels after Phase 4 closed: Rust ships as a tagged git dependency,
+TypeScript as `@remcostoeten/ai-core` and `@remcostoeten/ai-sdk` on npm. Both
+packages are published at 0.2.0 and `ai-v0.2.0` is pushed, so a consumer outside
+this workspace can now install either unit. See the addendum in ADR 0005.
 
 **Skriuw builds against 0.2.0 again.** ADR 0004's Rust source break was fixed in
 Skriuw on 2026-09-07 under its own authorization: `prior_messages: Vec::new()`

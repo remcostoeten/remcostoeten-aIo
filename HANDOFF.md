@@ -24,8 +24,8 @@ Both real consumers now sit on 0.2.0: Skriuw in Rust, Betalingen in TypeScript.
 
 Read before touching anything:
 
-- `docs/decisions/0005-distribution.md` — the channel decision, and the two
-  publishing acts it deliberately does **not** authorize.
+- `docs/decisions/0005-distribution.md` — the channel decision, and the
+  addendum recording that both publishing acts were performed at 0.2.0.
 - `docs/integration-betalingen.md` — what Phase 5 changed and what it left.
 - `docs/typescript-core.md` — the symbol map, the six shape differences between
   the languages, the two vendor quirks, and what is not implemented.
@@ -78,13 +78,20 @@ Both npm names are free and the scope is already the owner's. The placeholder
 
 ## What is still open
 
-**Neither publishing act has happened.** Nothing is on npm and the `ai-v0.2.0`
-tag is not pushed. Until then: Skriuw keeps its path dependencies, and
-**Betalingen is not deployable** — it resolves the packages through `file:`
-paths plus an `overrides` pin, which Vercel cannot install from. Its import
-specifiers are already final, so the fix is a publish and a version range, not a
-code change. Publishing is outward-facing and irreversible at a version number,
-so it needs its own explicit go-ahead.
+**Both publishing acts are done, on 2026-09-07.**
+`@remcostoeten/ai-core@0.2.0` and `@remcostoeten/ai-sdk@0.2.0` are on npm under
+`latest`, and `ai-v0.2.0` is pushed, pointing at `ef73940` on `master`. A
+`npm install` of both from a clean directory streams the documented output from
+the deterministic fake. See the addendum in `docs/decisions/0005-distribution.md`,
+including the second tag (`ai-sdk-v0.2.0`) that one-tag-per-run produced.
+
+**Betalingen is now unblocked but not yet fixed.** It still resolves the
+packages through `file:` paths plus an `overrides` pin, which Vercel cannot
+install from, so it is still not deployable. The fix is now available and small:
+replace those with `^0.2.0`. Its import specifiers are already final, so no code
+changes. That edit is inside a reference repository and needs its own
+instruction. Skriuw likewise still holds path dependencies and can move to
+`tag = "ai-v0.2.0"` whenever that is authorized.
 
 **Nothing has touched a live provider, in either language.** Every adapter test
 in this repository, in Skriuw and in Betalingen runs against a fixture `fetch`.
@@ -117,5 +124,6 @@ pre-existing `clippy::cloned_ref_to_slice_refs` warnings in
 `ai-ollama-runtime`, only after its platform and behavior scope is approved, and
 with Skriuw's migration onto it needing separate authorization again.
 
-Before that, the publish is the decision actually blocking something: one
-consumer cannot deploy without it.
+The publish that used to block Betalingen is done. What now blocks its
+deployment is a one-line manifest change inside Betalingen itself, which is a
+reference repository and needs its own instruction.

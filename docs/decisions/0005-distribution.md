@@ -117,6 +117,31 @@ So the state after this ADR is: the names, channels and versioning rule are
 settled and the code carries them, and the two publishing acts remain pending
 and deliberate.
 
+## Addendum, 2026-09-07: both acts were performed
+
+Both publishing acts were authorized and executed at 0.2.0, through the
+`releaser` CLI, from `master` at `ef73940`:
+
+- `@remcostoeten/ai-core@0.2.0` and `@remcostoeten/ai-sdk@0.2.0` are on npm
+  under `latest`.
+- `ai-v0.2.0` is pushed and points at `ef73940`. The Cargo snippet above is now
+  live.
+
+One detail this ADR did not anticipate. A release run creates exactly one tag,
+and an existing tag blocks a run without an override, so publishing two npm
+packages produced two tags rather than one: `ai-v0.2.0` for `ai-core` — the tag
+this ADR names and Rust consumers pin — and `ai-sdk-v0.2.0` for `ai-sdk`. Both
+point at the same commit, so they describe one release rather than two. The bare
+`v*` namespace stays free as this ADR intended.
+
+Because the manifests already carried 0.2.0, neither run rewrote a version, so
+the release recorded no commit: the tags sit on the commit that prepared them.
+
+Still not authorized by this addendum: editing Skriuw's manifests from path to
+git dependencies, and pointing Betalingen at the published versions instead of
+its `file:` paths. Both remain separate deliberate acts inside repositories this
+one does not own.
+
 ## Consequence for Phase 5
 
 Betalingen can be migrated against the packages before they are published, by
