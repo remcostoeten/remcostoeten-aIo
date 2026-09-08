@@ -6,12 +6,17 @@
 //! row is only sufficient when its fixtures prove the shared path fits.
 
 use ai_core::{AiCompletionRequest, AiUsage};
-use reqwest::{Url, blocking::RequestBuilder};
+use base64::Engine;
+use reqwest::{
+    Url,
+    blocking::{RequestBuilder, multipart},
+};
 use serde_json::{Value, json};
 
 use crate::{
     credentials::AiCredential,
     listing::{AiModelListing, AiModelSource, MAX_AI_CONTEXT_TOKENS},
+    transcription::{AiTranscriptionModel, AiTranscriptionRequest},
 };
 
 /// Identifier of the shipped Google Gemini registration.
@@ -311,6 +316,77 @@ impl RemoteProviderKind {
         }
     }
 
+    /// Whether this descriptor transcribes with a given model.
+    ///
+    /// The transcription catalogue is separate from [`Self::supports_model`]:
+    /// a completion model is not a transcription model, and asking one to
+    /// transcribe is a request the adapter refuses rather than sends.
+    ///
+    /// [`Self::supports_model`]: super::RemoteAiProvider::supports_model
+    #[must_use]
+    pub fn transcribes(self, model_id: &str) -> bool {
+        transcription_models()
+            .iter()
+            .any(|model| model.provider_id == self.id() && model.model_id == model_id)
+    }
+
+    pub(crate) fn transcription_endpoint(self, base: &Url, model_id: &str) -> Option<Url> {
+        match self {
+            Self::Gemini => base
+                .join(&format!("v1beta/models/{model_id}:generateContent"))
+                .ok(),
+            Self::Groq => base.join("openai/v1/audio/transcriptions").ok(),
+            _ => None,
+        }
+    }
+
+    /// Builds the provider's transcription request body.
+    ///
+    /// `None` means this descriptor has no transcription adapter, which is not
+    /// the same as a request it rejected.
+    pub(crate) fn transcription_body(
+        self,
+        request: &AiTranscriptionRequest,
+    ) -> Option<TranscriptionBody> {
+        match self {
+            Self::Gemini => Some(TranscriptionBody::Json(gemini_transcription_body(request))),
+            Self::Groq => groq_transcription_form(request).map(TranscriptionBody::Multipart),
+            _ => None,
+        }
+    }
+
+    /// Extracts the transcript from one provider response. `None` means the
+    /// payload was not the documented shape.
+    pub(crate) fn parse_transcript(self, payload: &str) -> Option<String> {
+        let value: Value = serde_json::from_str(payload).ok()?;
+        if value.get("error").is_some() {
+            return None;
+        }
+        match self {
+            Self::Gemini => {
+                let parts = value
+                    .get("candidates")
+                    .and_then(Value::as_array)
+                    .and_then(|candidates| candidates.first())
+                    .and_then(|candidate| candidate.get("content"))
+                    .and_then(|content| content.get("parts"))
+                    .and_then(Value::as_array)?;
+                let mut transcript = String::new();
+                for part in parts {
+                    if let Some(text) = part.get("text").and_then(Value::as_str) {
+                        transcript.push_str(text);
+                    }
+                }
+                Some(transcript)
+            }
+            Self::Groq => value
+                .get("text")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            _ => None,
+        }
+    }
+
     /// Translates one provider model-listing response into validated fetched
     /// listings. `None` means the payload was not the documented shape;
     /// individual entries that fail validation are dropped instead of failing
@@ -451,6 +527,106 @@ impl RemoteProviderKind {
                 Some(event)
             }
         }
+    }
+}
+
+/// A transcription request body, in whichever framing its provider documents.
+///
+/// Groq takes the recording as a `multipart/form-data` upload; Gemini takes it
+/// as base64 `inlineData` on an ordinary `generateContent` call. The difference
+/// is request syntax and stays here, behind one seam.
+pub(crate) enum TranscriptionBody {
+    Json(Value),
+    Multipart(multipart::Form),
+}
+
+/// Every model the shipped adapters transcribe with.
+///
+/// There is no discovery request: an entry exists exactly when the mapping
+/// above exists for it.
+#[must_use]
+pub fn transcription_models() -> Vec<AiTranscriptionModel> {
+    let model = |provider_id: &str, model_id: &str, label: &str| AiTranscriptionModel {
+        provider_id: provider_id.to_owned(),
+        model_id: model_id.to_owned(),
+        label: label.to_owned(),
+    };
+    vec![
+        model(
+            GROQ_PROVIDER_ID,
+            "whisper-large-v3-turbo",
+            "Whisper Large v3 Turbo",
+        ),
+        model(GROQ_PROVIDER_ID, "whisper-large-v3", "Whisper Large v3"),
+        model(GEMINI_PROVIDER_ID, "gemini-2.5-flash", "Gemini 2.5 Flash"),
+        model(
+            GEMINI_PROVIDER_ID,
+            "gemini-2.5-flash-lite",
+            "Gemini 2.5 Flash-Lite",
+        ),
+    ]
+}
+
+/// Gemini has no speech-to-text endpoint: transcription is an ordinary
+/// generation call whose prompt asks for a verbatim transcript. The instruction
+/// is therefore request syntax, not application prompting, and lives with the
+/// adapter that cannot work without it.
+fn gemini_transcription_body(request: &AiTranscriptionRequest) -> Value {
+    let language_hint = request
+        .language
+        .as_deref()
+        .map(|language| format!(" The speech is in \"{language}\"."))
+        .unwrap_or_default();
+    let instruction = format!(
+        "Transcribe this audio recording. Reply with the verbatim transcript \
+         only: no preamble, no commentary, no timestamps, no speaker \
+         labels.{language_hint}"
+    );
+    json!({
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {
+                    "inlineData": {
+                        "mimeType": request.mime_type,
+                        "data": base64::engine::general_purpose::STANDARD.encode(&request.audio),
+                    }
+                },
+                { "text": instruction },
+            ]
+        }],
+        "generationConfig": { "temperature": 0 },
+    })
+}
+
+/// `None` when the recording's content type could not be attached to the part,
+/// which the adapter reports as an internal failure rather than sending a
+/// upload the provider would reject.
+fn groq_transcription_form(request: &AiTranscriptionRequest) -> Option<multipart::Form> {
+    let part = multipart::Part::bytes(request.audio.clone())
+        .file_name(recording_filename(&request.mime_type))
+        .mime_str(&request.mime_type)
+        .ok()?;
+    let mut form = multipart::Form::new()
+        .part("file", part)
+        .text("model", request.model_id.clone())
+        .text("response_format", "json")
+        .text("temperature", "0");
+    if let Some(language) = &request.language {
+        form = form.text("language", language.clone());
+    }
+    Some(form)
+}
+
+/// The upload needs a filename, and Groq reads the extension. The recording is
+/// never written to disk.
+fn recording_filename(mime_type: &str) -> &'static str {
+    match mime_type {
+        "audio/ogg" => "recording.ogg",
+        "audio/mp4" => "recording.m4a",
+        "audio/mpeg" => "recording.mp3",
+        "audio/wav" => "recording.wav",
+        _ => "recording.webm",
     }
 }
 

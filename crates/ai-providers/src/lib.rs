@@ -64,6 +64,8 @@ mod unsupported;
 mod ollama;
 #[cfg(feature = "remote")]
 mod remote;
+#[cfg(feature = "remote")]
+mod transcription;
 
 #[cfg(all(test, any(feature = "ollama", feature = "remote")))]
 mod fixtures;
@@ -85,7 +87,12 @@ pub use ollama::{OLLAMA_PROVIDER_ID, OllamaProvider, OllamaSetupError};
 pub use remote::{
     AIMLAPI_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID, GEMINI_PROVIDER_ID,
     GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, RemoteAiProvider, RemoteAiSetupError,
-    RemoteProviderKind, ZAI_PROVIDER_ID,
+    RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
+};
+#[cfg(feature = "remote")]
+pub use transcription::{
+    AI_AUDIO_MIME_TYPES, AiTranscriptionError, AiTranscriptionModel, AiTranscriptionRequest,
+    AiTranscriptionTerminal, MAX_AI_AUDIO_BYTES, MAX_AI_LANGUAGE_BYTES, MAX_AI_TRANSCRIPT_BYTES,
 };
 
 #[cfg(feature = "schema-tool")]

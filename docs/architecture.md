@@ -66,9 +66,11 @@ Credential resolution is not needed by the Phase 1 fake/service seam. Introduce 
 
 ### 2.6 Models and structured output, deferred
 
-Keep flat providerId/modelId in Phase 1. Nested ModelRef, messages, a richer taxonomy, capabilities, model info, maxOutputTokens, and response formats can be designed against the next real consumer in an approved contract gate.
+Keep flat providerId/modelId in Phase 1. Nested ModelRef, messages, a richer taxonomy, capabilities, model info, maxOutputTokens, and response formats can be designed against the next real consumer in an approved contract gate. Two of these have since gone through that gate. ADR 0004 took `priorMessages` and `maxOutputTokens` into the contract at spec 0.2.0. ADR 0006 designed a capability question against a real consumer — `RemoteProviderKind::transcribes(model_id)`, a closed yes/no over the descriptors a transcription adapter mapping exists for, answered by the provider layer rather than by a name substring; it serializes nothing and so did not move the spec version. Nested ModelRef, the richer taxonomy, model info and response formats did not move with either, and one approved capability is not a precedent for the next.
 
 Structured-output strategy, validation dialect, typed decoding and repair remain unresolved for a future phase; no automatic ladder ships. Application text/list parsing remains supported. No unused tools/vision/audio/embeddings/reasoning variants, content-part nesting, finish reason, stop/suffix controls, or router attempt list are reserved.
+
+Audio is no longer hypothetical, and the distinction matters. ADR 0006 approved transcription against a shipped Skriuw consumer, and what it added is a *separate* seam in `ai-providers` — `AiTranscriptionRequest`, `AiTranscriptionTerminal` and an inherent `RemoteAiProvider::transcribe`, alongside `list_models` rather than inside completion. It added no audio variant to the completion contract, no enum value, no content part, and no field: the completion contract is exactly what it was. The rest of the sentence above still holds as written.
 
 ### 2.7 Ollama and platform helpers
 
@@ -90,7 +92,7 @@ Never silently fall back from local to remote inference. Never switch provider o
 | --- | --- | --- |
 | ai-core, Phase 1 | Completion contract and service | Existing serde/schemars/thiserror needs; serde_json for schemas/tests as needed; std threads; no application crate dependency |
 | Schema tool, Phase 1 | Development generation/checking | Prefer a target in the existing crate; never shipped as a runtime dependency |
-| ai-providers, Phase 2 | HTTP and provider protocols | ai-core, HTTP/JSON libraries required by implemented adapters; feature isolation verified |
+| ai-providers, Phase 2 | HTTP and provider protocols | ai-core, HTTP/JSON libraries required by implemented adapters; feature isolation verified. Transcription (ADR 0006) added `reqwest`'s `multipart` feature and a workspace `base64`, both request encoding rather than a new transport: the HTTP client, redirect policy and destination check are the ones already there |
 | packages/core, Phase 4 | Portable contracts and consumption | Runtime validation dependency only as justified; no Vercel or framework dependency |
 | packages/ai-sdk, Phase 4 | Isolate Vercel provider dependencies | packages/core and selected AI SDK/provider packages, with tested version compatibility |
 | ai-ollama-runtime, Phase 6 | Process/filesystem/archive lifecycle | Core cancellation if useful; its own progress/error types; no completion logic |

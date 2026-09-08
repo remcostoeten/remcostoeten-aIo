@@ -142,6 +142,39 @@ git dependencies, and pointing Betalingen at the published versions instead of
 its `file:` paths. Both remain separate deliberate acts inside repositories this
 one does not own.
 
+## Addendum, 2026-09-09: ADR 0006 amends the versioning rule
+
+The Versioning section above binds the npm `version` and the Cargo
+`workspace.package.version` to `specs/VERSION` as one number.
+[ADR 0006](0006-transcription.md) amends that, narrowly.
+
+The single number binds `specs/VERSION` to the *published* artifacts. A
+Rust-only change that adds no shared contract may take a git tag without an npm
+release. Transcription is such a change: it serializes nothing, adds no entry to
+`specs/schemas/`, `specs/fixtures/` or `generate_all()`, and gives
+`packages/ai-sdk` no new surface.
+
+So, precisely:
+
+- `workspace.package.version` moves to 0.3.0, and the annotated tag `ai-v0.3.0`
+  is cut. Rust consumers pinning the new crate use that tag.
+- `specs/VERSION` stays 0.2.0. `@remcostoeten/ai-core` and `@remcostoeten/ai-sdk`
+  stay at 0.2.0 on npm, and nothing is republished.
+- The `tag = "ai-v0.2.0"` snippet earlier in this ADR is not superseded. It
+  remains what was released at 0.2.0, and `ai-v0.2.0` still points at `ef73940`.
+  `ai-v0.3.0` is the tag a Rust consumer moves *to*; the TypeScript side has no
+  corresponding move to make.
+
+The invariant this ADR cared about survives — a consumer still cannot pair a
+0.2.0 package with a crate speaking a different contract, because the contract
+did not move. The cost is that the two numbers are no longer the same string,
+and a reader must now know which of them answers a given question:
+`specs/VERSION` answers "what contract", `workspace.package.version` answers
+"what Rust code".
+
+Nothing here authorizes an npm publish. That remains what it was above: a
+separate, deliberate, explicitly instructed act.
+
 ## Consequence for Phase 5
 
 Betalingen can be migrated against the packages before they are published, by

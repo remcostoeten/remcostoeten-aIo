@@ -46,7 +46,13 @@ No application prompt catalog or context builder is extracted. A provider's mini
 
 ## Non-goals
 
-No agents, workflows, chains, tool execution, embeddings, transcription, prompt marketplace, task framework, React UI kit, fixed-command Tauri plugin, Hono/Next.js package, shared telemetry database, browser secret store, or replacement for Vercel AI SDK.
+No agents, workflows, chains, tool execution, embeddings, prompt marketplace, task framework, React UI kit, fixed-command Tauri plugin, Hono/Next.js package, shared telemetry database, browser secret store, or replacement for Vercel AI SDK.
+
+Transcription was on that list until 2026-09-09, when ADR 0006 removed it for a
+shipped consumer whose provider request syntax belonged in the adapters. The
+removal is that narrow: speech-to-text through the existing remote descriptors,
+serializing nothing. The rest of the list stands, and one approved capability is
+not an argument for the next.
 
 No public `any`, broad `unknown`, provider metadata escape hatch, or arbitrary JSON option bag. Dynamic provider bodies are decoded inside adapters. Future schema payloads need a bounded schema contract; they do not justify weakening all request types.
 

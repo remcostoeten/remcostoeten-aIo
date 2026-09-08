@@ -10,13 +10,14 @@ use reqwest::Url;
 
 use super::{
     GEMINI_PROVIDER_ID, GROQ_PROVIDER_ID, MAX_STREAM_EVENT_BYTES, RemoteAiProvider,
-    RemoteAiSetupError, RemoteProviderKind, ZAI_PROVIDER_ID,
+    RemoteAiSetupError, RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
 };
 use crate::{
     authority::AiModelAuthority,
     credentials::{AiCredential, AiCredentialError, AiCredentialRefusal, AiCredentialSource},
     fixtures::{self, Reply},
     listing::AiModelSource,
+    transcription::{AiTranscriptionRequest, AiTranscriptionTerminal},
 };
 
 const KEY: &str = "sk-test-provider-key";
@@ -151,6 +152,15 @@ fn every_endpoint_stays_on_the_disclosed_destination() {
                 "{} has no listing endpoint but claims listing support",
                 kind.id()
             ),
+        }
+        for model in transcription_models()
+            .iter()
+            .filter(|model| model.provider_id == kind.id())
+        {
+            let url = kind
+                .transcription_endpoint(&base, &model.model_id)
+                .expect("a catalogued transcription model has an endpoint");
+            endpoints.push(url);
         }
         for url in endpoints {
             assert_eq!(
@@ -929,6 +939,189 @@ fn verification_refuses_a_model_the_application_did_not_permit() {
         error.recovery_action,
         AiRecoveryAction::ChooseDifferentModel
     );
+    assert!(server.join().expect("server").is_none(), "no socket opened");
+}
+
+// Transcription.
+
+fn transcription_request(provider_id: &str, model_id: &str) -> AiTranscriptionRequest {
+    AiTranscriptionRequest {
+        request_id: "request-1".into(),
+        provider_id: provider_id.into(),
+        model_id: model_id.into(),
+        mime_type: "audio/webm".into(),
+        language: Some("en".into()),
+        audio: vec![0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02],
+    }
+}
+
+fn transcription_error(terminal: AiTranscriptionTerminal) -> ai_core::AiProviderError {
+    match terminal {
+        AiTranscriptionTerminal::ProviderError(error) => error,
+        other => panic!("expected a provider error, got {other:?}"),
+    }
+}
+
+#[test]
+fn ships_a_valid_transcription_catalogue_for_shipped_adapters() {
+    let models = transcription_models();
+
+    assert!(!models.is_empty());
+    for model in &models {
+        assert_eq!(model.validate(), Ok(()));
+        let kind = RemoteProviderKind::from_id(&model.provider_id).expect("descriptor");
+        assert!(kind.transcribes(&model.model_id));
+    }
+    assert!(!RemoteProviderKind::DeepSeek.transcribes("whisper-large-v3"));
+    assert!(!RemoteProviderKind::Groq.transcribes(GROQ_MODEL));
+}
+
+#[test]
+fn uploads_groq_recordings_as_multipart_and_parses_the_transcript() {
+    let (base, server) = fixtures::serve(fixtures::ok(
+        "application/json",
+        "{\"text\":\" hello world \"}".to_owned(),
+    ));
+    let provider = build_provider(RemoteProviderKind::Groq, &base, Arc::new(StoredKey));
+
+    let terminal = provider.transcribe(
+        &transcription_request(GROQ_PROVIDER_ID, "whisper-large-v3-turbo"),
+        &AiCancellation::new(),
+    );
+
+    assert_eq!(
+        terminal,
+        AiTranscriptionTerminal::Done {
+            transcript: "hello world".to_owned()
+        }
+    );
+    let captured = server.join().expect("server");
+    assert!(captured.contains("POST /openai/v1/audio/transcriptions"));
+    assert!(captured.contains("authorization: Bearer"));
+    assert!(captured.contains("multipart/form-data"));
+    assert!(captured.contains("whisper-large-v3-turbo"));
+    assert!(captured.contains("filename=\"recording.webm\""));
+}
+
+#[test]
+fn sends_gemini_recordings_inline_and_parses_the_transcript() {
+    let (base, server) = fixtures::serve(fixtures::ok(
+        "application/json",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello \"},{\"text\":\"world\"}]}}]}"
+            .to_owned(),
+    ));
+    let provider = build_provider(RemoteProviderKind::Gemini, &base, Arc::new(StoredKey));
+
+    let terminal = provider.transcribe(
+        &transcription_request(GEMINI_PROVIDER_ID, "gemini-2.5-flash"),
+        &AiCancellation::new(),
+    );
+
+    assert_eq!(
+        terminal,
+        AiTranscriptionTerminal::Done {
+            transcript: "hello world".to_owned()
+        }
+    );
+    let captured = server.join().expect("server");
+    assert!(captured.contains("POST /v1beta/models/gemini-2.5-flash:generateContent"));
+    assert!(captured.contains("x-goog-api-key"));
+    assert!(captured.contains("inlineData"));
+    assert!(captured.contains("audio/webm"));
+}
+
+#[test]
+fn never_opens_a_socket_to_transcribe_without_a_credential() {
+    let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+    let provider = build_provider(
+        RemoteProviderKind::Groq,
+        &base,
+        Arc::new(RefusedKey(AiCredentialRefusal::Missing)),
+    );
+
+    let error = transcription_error(provider.transcribe(
+        &transcription_request(GROQ_PROVIDER_ID, "whisper-large-v3"),
+        &AiCancellation::new(),
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::MissingCredential);
+    assert_eq!(error.recovery_action, AiRecoveryAction::ConfigureCredential);
+    assert!(server.join().expect("server").is_none(), "no socket opened");
+}
+
+#[test]
+fn refuses_a_model_the_provider_does_not_transcribe_with() {
+    let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+    let provider = build_provider(RemoteProviderKind::Groq, &base, Arc::new(StoredKey));
+
+    let error = transcription_error(provider.transcribe(
+        &transcription_request(GROQ_PROVIDER_ID, GROQ_MODEL),
+        &AiCancellation::new(),
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::RejectedRequest);
+    assert!(server.join().expect("server").is_none(), "no socket opened");
+}
+
+#[test]
+fn refuses_transcription_on_a_descriptor_that_has_no_adapter() {
+    let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+    let provider = build_provider(RemoteProviderKind::DeepSeek, &base, Arc::new(StoredKey));
+
+    let error = transcription_error(provider.transcribe(
+        &transcription_request("deepseek", "whisper-large-v3"),
+        &AiCancellation::new(),
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::RejectedRequest);
+    assert!(server.join().expect("server").is_none(), "no socket opened");
+}
+
+#[test]
+fn maps_a_rejected_transcription_key_without_echoing_the_body() {
+    let (base, server) = fixtures::serve(fixtures::status(
+        "401 Unauthorized",
+        format!("{{\"error\":\"{KEY} is invalid\"}}"),
+    ));
+    let provider = build_provider(RemoteProviderKind::Groq, &base, Arc::new(StoredKey));
+
+    let error = transcription_error(provider.transcribe(
+        &transcription_request(GROQ_PROVIDER_ID, "whisper-large-v3"),
+        &AiCancellation::new(),
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::InvalidCredential);
+    assert!(!error.message.contains(KEY));
+    let _ = server.join();
+}
+
+#[test]
+fn fails_visibly_on_malformed_transcription_data() {
+    let (base, server) = fixtures::serve(fixtures::ok("application/json", "not json".to_owned()));
+    let provider = build_provider(RemoteProviderKind::Gemini, &base, Arc::new(StoredKey));
+
+    let error = transcription_error(provider.transcribe(
+        &transcription_request(GEMINI_PROVIDER_ID, "gemini-2.5-flash"),
+        &AiCancellation::new(),
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::MalformedResponse);
+    let _ = server.join();
+}
+
+#[test]
+fn stops_before_sending_when_the_transcription_is_already_cancelled() {
+    let (base, server) = fixtures::serve_unvisited(UNVISITED_WINDOW);
+    let provider = build_provider(RemoteProviderKind::Groq, &base, Arc::new(StoredKey));
+    let cancellation = AiCancellation::new();
+    cancellation.cancel();
+
+    let terminal = provider.transcribe(
+        &transcription_request(GROQ_PROVIDER_ID, "whisper-large-v3"),
+        &cancellation,
+    );
+
+    assert_eq!(terminal, AiTranscriptionTerminal::Cancelled);
     assert!(server.join().expect("server").is_none(), "no socket opened");
 }
 

@@ -72,6 +72,8 @@ The former conceptual v1 API is not mandatory Phase 1 output. contracts §4 reco
 
 **Run once, on 2026-09-07, for Phase 4's history/token-limit prerequisite.** ADR 0004 records the approved delta: `priorMessages` on the request and `maxOutputTokens` on the parameters, both defaulted, with `systemPrompt`/`userPrompt` unchanged. Consumer, exact types, validators, positive and negative fixtures and the migration mapping are in that ADR. `specs/VERSION` moved to 0.2.0. Every other item this gate governs — messages-only requests, capabilities, richer errors, model metadata, structured output — remains ungated.
 
+**Run a second time, on 2026-09-09, for Skriuw's shipped voice dictation.** ADR 0006 records the approved delta: speech-to-text on the existing remote descriptors, as an inherent `RemoteAiProvider::transcribe` alongside `list_models`. Consumer, exact types, validators, positive and negative fixtures and the migration mapping are in that ADR. `specs/VERSION` did **not** move, and neither did either npm package: nothing added is serialized, so no shared contract changed and the gate's serialization clause was not engaged. `workspace.package.version` moved to 0.3.0 for the `ai-v0.3.0` tag alone. The capability clause is now spent for transcription only — every other capability, and every remaining item this gate governs, stays ungated.
+
 ## Phase 2: extract Rust providers
 
 Purpose: create ai-providers from the provider execution already used by Skriuw, retaining the Phase 1 core seam.
@@ -162,4 +164,6 @@ Exit: one approved real consumer and its offline fallback/privacy tests pass. St
 
 ## Not scheduled
 
-Agents, tools, embeddings, transcription, autocomplete-specific controls, prompt/task packages, React hooks, Hono/Next.js integrations, browser BYOK, telemetry storage, async Rust facade, and structured-output repair remain unscheduled until a concrete approved requirement exists.
+Agents, tools, embeddings, autocomplete-specific controls, prompt/task packages, React hooks, Hono/Next.js integrations, browser BYOK, telemetry storage, async Rust facade, and structured-output repair remain unscheduled until a concrete approved requirement exists.
+
+Transcription left this list on 2026-09-09. Skriuw had shipped voice dictation and its provider request syntax belonged in the adapters; ADR 0006 records the requirement, the delta and its bounds. It arrived through the contract evolution gate above rather than as a phase, because it extends one adapter rather than moving a boundary.

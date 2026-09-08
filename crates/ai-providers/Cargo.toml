@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ai-core = { path = "../ai-core" }
+base64.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true

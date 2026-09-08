@@ -28,19 +28,27 @@ use crate::{
     credentials::{AiCredential, AiCredentialSource},
     http::{self, SSE_DONE_PAYLOAD},
     listing::{AiModelListing, MAX_AI_MODEL_LISTINGS, valid_model_identifier},
+    transcription::{AiTranscriptionRequest, AiTranscriptionTerminal, MAX_AI_TRANSCRIPT_BYTES},
 };
 
-use descriptor::ProviderEvent;
 pub use descriptor::{
     AIMLAPI_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID, GEMINI_PROVIDER_ID,
     GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, RemoteProviderKind, ZAI_PROVIDER_ID,
+    transcription_models,
 };
+use descriptor::{ProviderEvent, TranscriptionBody};
 
 const MAX_STREAM_EVENT_BYTES: u64 = 64 * 1024;
 const MAX_DISCARDED_RESPONSE_BYTES: u64 = 256 * 1024;
 const MAX_MODEL_LIST_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
+/// The transcript plus its provider JSON framing. A larger body is cut off and
+/// refused as malformed rather than buffered without bound.
+const MAX_TRANSCRIPTION_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const ADMINISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
+/// One fixed budget rather than a per-request one: a transcription carries no
+/// parameters, and the whole recording uploads before any work begins.
+const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A remote provider bound to one descriptor, one credential source, and one
 /// model authority.
@@ -230,6 +238,118 @@ impl RemoteAiProvider {
             Ok(())
         } else {
             Err(self.status_error(status))
+        }
+    }
+
+    /// Transcribes one recording.
+    ///
+    /// Inherent rather than part of a trait, for the same reason listing is:
+    /// most providers do not transcribe at all, and a fake or local adapter
+    /// should not have to pretend otherwise. [`RemoteProviderKind::transcribes`]
+    /// answers whether a model is in the catalogue before a request is built.
+    ///
+    /// One request and one response, never a stream. Cancellation is therefore
+    /// cooperative and checked at the two points where it can still avoid work:
+    /// before the socket opens and before the transcript is parsed. It cannot
+    /// abort an upload already in flight.
+    pub fn transcribe(
+        &self,
+        request: &AiTranscriptionRequest,
+        cancellation: &AiCancellation,
+    ) -> AiTranscriptionTerminal {
+        if request.validate().is_err()
+            || request.provider_id != self.kind.id()
+            || !self.kind.transcribes(&request.model_id)
+        {
+            return AiTranscriptionTerminal::ProviderError(self.error(
+                AiProviderErrorCategory::RejectedRequest,
+                "the transcription request is not valid for this provider",
+                AiRecoveryAction::ReduceRequest,
+            ));
+        }
+        if cancellation.is_cancelled() {
+            return AiTranscriptionTerminal::Cancelled;
+        }
+        // Same order as a completion: an unconfigured or refused provider
+        // terminalizes before any socket opens, and the resolver may block on a
+        // keyring prompt, so cancellation is rechecked after it.
+        let credential = match self.credentials.resolve(self.kind.id()) {
+            Ok(credential) => credential,
+            Err(error) => {
+                return AiTranscriptionTerminal::ProviderError(
+                    error.into_provider_error(self.kind.id()),
+                );
+            }
+        };
+        if cancellation.is_cancelled() {
+            return AiTranscriptionTerminal::Cancelled;
+        }
+        let Some(url) = self
+            .kind
+            .transcription_endpoint(&self.base_url, &request.model_id)
+            .filter(|url| self.stays_on_destination(url))
+        else {
+            return AiTranscriptionTerminal::ProviderError(self.error(
+                AiProviderErrorCategory::InternalFailure,
+                "provider transcription endpoint could not be built",
+                AiRecoveryAction::None,
+            ));
+        };
+        let Some(body) = self.kind.transcription_body(request) else {
+            return AiTranscriptionTerminal::ProviderError(self.error(
+                AiProviderErrorCategory::InternalFailure,
+                "the recording could not be prepared for this provider",
+                AiRecoveryAction::None,
+            ));
+        };
+        let builder = self
+            .kind
+            .authorize(self.client.post(url), &credential)
+            .timeout(TRANSCRIPTION_TIMEOUT);
+        let builder = match body {
+            TranscriptionBody::Json(body) => builder.json(&body),
+            TranscriptionBody::Multipart(form) => builder.multipart(form),
+        };
+        let response = match builder.send() {
+            Ok(response) => response,
+            Err(error) if error.is_timeout() => return AiTranscriptionTerminal::Timeout,
+            Err(error) => {
+                return AiTranscriptionTerminal::ProviderError(self.transport_error(&error));
+            }
+        };
+        let status = response.status();
+        let mut payload = Vec::new();
+        let _ = response
+            .take(MAX_TRANSCRIPTION_RESPONSE_BYTES)
+            .read_to_end(&mut payload);
+        if !status.is_success() {
+            return AiTranscriptionTerminal::ProviderError(self.status_error(status));
+        }
+        if cancellation.is_cancelled() {
+            return AiTranscriptionTerminal::Cancelled;
+        }
+        let malformed = || {
+            AiTranscriptionTerminal::ProviderError(self.error(
+                AiProviderErrorCategory::MalformedResponse,
+                "the provider returned an unrecognisable transcript",
+                AiRecoveryAction::Retry,
+            ))
+        };
+        let Ok(payload) = String::from_utf8(payload) else {
+            return malformed();
+        };
+        let Some(transcript) = self.kind.parse_transcript(&payload) else {
+            return malformed();
+        };
+        if transcript.len() > MAX_AI_TRANSCRIPT_BYTES {
+            return AiTranscriptionTerminal::ProviderError(self.error(
+                AiProviderErrorCategory::MalformedResponse,
+                "the provider returned a transcript larger than the configured limit",
+                AiRecoveryAction::ReduceRequest,
+            ));
+        }
+        AiTranscriptionTerminal::Done {
+            transcript: transcript.trim().to_owned(),
         }
     }
 

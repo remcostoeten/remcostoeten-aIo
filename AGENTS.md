@@ -813,14 +813,27 @@ for whichever unit you are touching:
 * `docs/integration-skriuw.md` — what Skriuw's migration cost
 * `docs/typescript-core.md` — `packages/core` and `packages/ai-sdk`
 * `docs/integration-betalingen.md` — what Betalingen's migration cost
-* `docs/decisions/0005-distribution.md` — the channels, and the publishes still pending
+* `docs/decisions/0005-distribution.md` — the channels, the 0.2.0 publish, and the amended versioning rule
+* `docs/decisions/0006-transcription.md` — speech-to-text in the provider adapters
 
 `./scripts/check.sh` runs everything. It must stay green and it must stay
 offline: no step may need a network, a provider key, or a sibling checkout.
 
+Two version numbers now, not one. `specs/VERSION` stays 0.2.0 and both npm
+packages stay 0.2.0; `workspace.package.version` is 0.3.0. ADR 0006 amends ADR
+0005 to permit exactly this — a Rust-only change adding no shared contract may
+take a git tag without an npm release — and nothing wider.
+
+The 0.2.0 publish happened. `@remcostoeten/ai-core@0.2.0` and
+`@remcostoeten/ai-sdk@0.2.0` are on npm and the `ai-v0.2.0` tag is pushed, both
+authorized explicitly on 2026-09-07 and recorded in ADR 0005's addendum.
+Transcription was authorized explicitly on 2026-09-09 and recorded in ADR 0006,
+which also authorizes the `ai-v0.3.0` tag.
+
 **Phase 6 has not begun and is not authorized.** Neither has any other phase.
-Publishing to npm and pushing the `ai-v0.2.0` tag are separate acts that ADR
-0005 deliberately leaves unauthorized.
+Every further npm publish remains a separate act needing its own explicit
+instruction, as does any other outward-facing or irreversible step; a past
+authorization is not a standing one.
 
 ## Phase gates
 
@@ -947,9 +960,16 @@ Do not silently continue to another phase.
 
 Until explicitly told otherwise:
 
-**Remain within Phase 4's closed boundary.**
+**Remain within Phase 5's closed boundary.** Phases 0 through 5 are complete.
 
 Fixing, documenting, testing and reviewing what exists is allowed. Beginning
-Phase 5 — or any later phase — requires an explicit instruction. So does
+Phase 6 — or any later phase — requires an explicit instruction. So does
 modifying a reference repository, and so does a contract change: run the
-contract evolution gate in `docs/roadmap.md` and record an ADR first.
+contract evolution gate in `docs/roadmap.md` and record an ADR first. So does
+publishing to npm.
+
+Transcription in `crates/ai-providers` is inside the boundary, by the explicit
+approval of 2026-09-09 recorded in `docs/decisions/0006-transcription.md`. That
+approval is bounded by what that ADR authorizes and no further: it does not
+authorize a `packages/ai-sdk` transcription surface, a serialized transcription
+contract, another provider, a live transcription test, or an npm publish.
