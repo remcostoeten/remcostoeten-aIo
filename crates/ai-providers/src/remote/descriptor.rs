@@ -33,6 +33,19 @@ pub const ZAI_PROVIDER_ID: &str = "zai";
 pub const DASHSCOPE_PROVIDER_ID: &str = "dashscope";
 /// Identifier of the shipped AI/ML API registration.
 pub const AIMLAPI_PROVIDER_ID: &str = "aimlapi";
+/// Identifier of the shipped Anthropic registration.
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+/// Identifier of the shipped OpenAI registration.
+pub const OPENAI_PROVIDER_ID: &str = "openai";
+/// Identifier of the shipped OpenRouter registration.
+pub const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+
+/// The Messages API version every Anthropic request names.
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// Anthropic requires an output ceiling on every request. Thinking counts
+/// against it, so this is sized for a long answer plus its reasoning; the
+/// byte limit the application set is still enforced on the stream.
+const ANTHROPIC_MAX_TOKENS: u32 = 16_000;
 
 /// One parsed stream frame, normalized away from provider syntax.
 ///
@@ -44,12 +57,17 @@ pub const AIMLAPI_PROVIDER_ID: &str = "aimlapi";
 pub(crate) struct ProviderEvent {
     pub(crate) text: String,
     pub(crate) usage: Option<AiUsage>,
+    /// One half of a usage report, for a dialect that sends its two counters
+    /// in different frames (Anthropic). The stream loop joins them; a dialect
+    /// that reports both at once uses `usage` and leaves these empty.
+    pub(crate) input_tokens: Option<u64>,
+    pub(crate) output_tokens: Option<u64>,
     pub(crate) finished: bool,
 }
 
-/// Every provider except Gemini speaks the OpenAI chat-completions dialect, so
-/// each is one row here and the request, stream, and model-listing code is
-/// shared. The paths are relative to the base URL, which always ends in `/`.
+/// Every provider except Gemini and Anthropic speaks the OpenAI
+/// chat-completions dialect, so each is one row here and the request, stream,
+/// and model-listing code is shared. The paths are relative to the base URL, which always ends in `/`.
 struct OpenAiCompatible {
     id: &'static str,
     label: &'static str,
@@ -62,6 +80,40 @@ struct OpenAiCompatible {
     /// Whether the provider accepts `stream_options.include_usage`. Providers
     /// that reject unknown parameters would fail the whole request over it.
     stream_usage_option: bool,
+    /// Whether `temperature` and `top_p` are transmitted. OpenAI's reasoning
+    /// models reject any value but the default, and a row cannot tell which
+    /// model it is addressing, so that row sends neither.
+    sampling: bool,
+    /// The name of the output ceiling on the verification request. OpenAI
+    /// renamed it and rejects the old name on its newer models.
+    max_tokens_field: &'static str,
+    /// The smallest ceiling the provider answers without an error.
+    verification_tokens: u32,
+    /// Whether a listed model id is a chat model. `None` when the listing
+    /// already holds only chat models, or marks the others itself.
+    lists_model: Option<fn(&str) -> bool>,
+}
+
+/// OpenAI lists every model the key can reach under one shape, with nothing
+/// that separates chat from audio, image, embedding, and moderation models but
+/// the id.
+fn openai_chat_model(model_id: &str) -> bool {
+    const FAMILIES: [&str; 5] = ["gpt-", "chatgpt-", "o1", "o3", "o4"];
+    const OTHER_ENDPOINTS: [&str; 9] = [
+        "audio",
+        "realtime",
+        "transcribe",
+        "tts",
+        "image",
+        "embedding",
+        "search",
+        "instruct",
+        "moderation",
+    ];
+    FAMILIES.iter().any(|family| model_id.starts_with(family))
+        && !OTHER_ENDPOINTS
+            .iter()
+            .any(|endpoint| model_id.contains(endpoint))
 }
 
 /// A shipped provider descriptor.
@@ -86,11 +138,17 @@ pub enum RemoteProviderKind {
     DashScope,
     /// AI/ML API.
     AimlApi,
+    /// Anthropic Claude, Messages dialect.
+    Anthropic,
+    /// OpenAI.
+    OpenAi,
+    /// OpenRouter.
+    OpenRouter,
 }
 
 impl RemoteProviderKind {
     /// Every shipped descriptor.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::Gemini,
         Self::Groq,
         Self::DeepSeek,
@@ -98,11 +156,14 @@ impl RemoteProviderKind {
         Self::Zai,
         Self::DashScope,
         Self::AimlApi,
+        Self::Anthropic,
+        Self::OpenAi,
+        Self::OpenRouter,
     ];
 
     fn openai_compatible(self) -> Option<&'static OpenAiCompatible> {
         match self {
-            Self::Gemini => None,
+            Self::Gemini | Self::Anthropic => None,
             Self::Groq => Some(&OpenAiCompatible {
                 id: GROQ_PROVIDER_ID,
                 label: "Groq",
@@ -111,6 +172,10 @@ impl RemoteProviderKind {
                 chat_path: "openai/v1/chat/completions",
                 models_path: Some("openai/v1/models"),
                 stream_usage_option: true,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
             Self::DeepSeek => Some(&OpenAiCompatible {
                 id: DEEPSEEK_PROVIDER_ID,
@@ -120,6 +185,10 @@ impl RemoteProviderKind {
                 chat_path: "chat/completions",
                 models_path: Some("models"),
                 stream_usage_option: true,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
             Self::Moonshot => Some(&OpenAiCompatible {
                 id: MOONSHOT_PROVIDER_ID,
@@ -129,6 +198,10 @@ impl RemoteProviderKind {
                 chat_path: "v1/chat/completions",
                 models_path: Some("v1/models"),
                 stream_usage_option: true,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
             Self::Zai => Some(&OpenAiCompatible {
                 id: ZAI_PROVIDER_ID,
@@ -138,6 +211,10 @@ impl RemoteProviderKind {
                 chat_path: "api/paas/v4/chat/completions",
                 models_path: None,
                 stream_usage_option: false,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
             Self::DashScope => Some(&OpenAiCompatible {
                 id: DASHSCOPE_PROVIDER_ID,
@@ -147,6 +224,10 @@ impl RemoteProviderKind {
                 chat_path: "compatible-mode/v1/chat/completions",
                 models_path: Some("compatible-mode/v1/models"),
                 stream_usage_option: true,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
             Self::AimlApi => Some(&OpenAiCompatible {
                 id: AIMLAPI_PROVIDER_ID,
@@ -156,6 +237,36 @@ impl RemoteProviderKind {
                 chat_path: "v1/chat/completions",
                 models_path: Some("v1/models"),
                 stream_usage_option: true,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
+            }),
+            Self::OpenAi => Some(&OpenAiCompatible {
+                id: OPENAI_PROVIDER_ID,
+                label: "OpenAI",
+                destination: "api.openai.com",
+                base_url: "https://api.openai.com/",
+                chat_path: "v1/chat/completions",
+                models_path: Some("v1/models"),
+                stream_usage_option: true,
+                sampling: false,
+                max_tokens_field: "max_completion_tokens",
+                verification_tokens: 16,
+                lists_model: Some(openai_chat_model),
+            }),
+            Self::OpenRouter => Some(&OpenAiCompatible {
+                id: OPENROUTER_PROVIDER_ID,
+                label: "OpenRouter",
+                destination: "openrouter.ai",
+                base_url: "https://openrouter.ai/",
+                chat_path: "api/v1/chat/completions",
+                models_path: Some("api/v1/models"),
+                stream_usage_option: false,
+                sampling: true,
+                max_tokens_field: "max_tokens",
+                verification_tokens: 1,
+                lists_model: None,
             }),
         }
     }
@@ -165,6 +276,7 @@ impl RemoteProviderKind {
     pub fn id(self) -> &'static str {
         match self.openai_compatible() {
             Some(provider) => provider.id,
+            None if self == Self::Anthropic => ANTHROPIC_PROVIDER_ID,
             None => GEMINI_PROVIDER_ID,
         }
     }
@@ -174,6 +286,7 @@ impl RemoteProviderKind {
     pub fn label(self) -> &'static str {
         match self.openai_compatible() {
             Some(provider) => provider.label,
+            None if self == Self::Anthropic => "Anthropic",
             None => "Google Gemini",
         }
     }
@@ -187,6 +300,7 @@ impl RemoteProviderKind {
     pub fn destination(self) -> &'static str {
         match self.openai_compatible() {
             Some(provider) => provider.destination,
+            None if self == Self::Anthropic => "api.anthropic.com",
             None => "generativelanguage.googleapis.com",
         }
     }
@@ -215,6 +329,7 @@ impl RemoteProviderKind {
     pub(crate) fn default_base_url(self) -> &'static str {
         match self.openai_compatible() {
             Some(provider) => provider.base_url,
+            None if self == Self::Anthropic => "https://api.anthropic.com/",
             None => "https://generativelanguage.googleapis.com/",
         }
     }
@@ -222,6 +337,7 @@ impl RemoteProviderKind {
     pub(crate) fn endpoint(self, base: &Url, model_id: &str, streaming: bool) -> Option<Url> {
         match self.openai_compatible() {
             Some(provider) => base.join(provider.chat_path).ok(),
+            None if self == Self::Anthropic => base.join("v1/messages").ok(),
             None => {
                 let method = if streaming {
                     "streamGenerateContent?alt=sse"
@@ -237,6 +353,7 @@ impl RemoteProviderKind {
     pub(crate) fn models_endpoint(self, base: &Url) -> Option<Url> {
         match self.openai_compatible() {
             Some(provider) => base.join(provider.models_path?).ok(),
+            None if self == Self::Anthropic => base.join("v1/models?limit=1000").ok(),
             None => base.join("v1beta/models?pageSize=1000").ok(),
         }
     }
@@ -251,6 +368,9 @@ impl RemoteProviderKind {
     ) -> RequestBuilder {
         match self {
             Self::Gemini => builder.header("x-goog-api-key", credential.expose()),
+            Self::Anthropic => builder
+                .header("x-api-key", credential.expose())
+                .header("anthropic-version", ANTHROPIC_VERSION),
             _ => builder.bearer_auth(credential.expose()),
         }
     }
@@ -273,11 +393,25 @@ impl RemoteProviderKind {
                 if streaming && provider.stream_usage_option {
                     body["stream_options"] = json!({"include_usage": true});
                 }
-                if let Some(temperature) = temperature {
+                if let Some(temperature) = temperature.filter(|_| provider.sampling) {
                     body["temperature"] = json!(temperature);
                 }
-                if let Some(top_p) = top_p {
+                if let Some(top_p) = top_p.filter(|_| provider.sampling) {
                     body["top_p"] = json!(top_p);
+                }
+                body
+            }
+            // No sampling parameters: Anthropic's current models reject them,
+            // and the row cannot tell which model it is addressing.
+            None if self == Self::Anthropic => {
+                let mut body = json!({
+                    "model": request.model_id,
+                    "max_tokens": ANTHROPIC_MAX_TOKENS,
+                    "messages": [{"role": "user", "content": request.user_prompt}],
+                    "stream": streaming,
+                });
+                if !request.system_prompt.is_empty() {
+                    body["system"] = json!(request.system_prompt);
                 }
                 body
             }
@@ -307,12 +441,25 @@ impl RemoteProviderKind {
                 "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
                 "generationConfig": {"maxOutputTokens": 1},
             }),
-            _ => json!({
+            Self::Anthropic => json!({
                 "model": model_id,
-                "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1,
-                "stream": false,
+                "messages": [{"role": "user", "content": "ping"}],
             }),
+            _ => {
+                let mut body = json!({
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "stream": false,
+                });
+                let (field, tokens) = self
+                    .openai_compatible()
+                    .map_or(("max_tokens", 1), |provider| {
+                        (provider.max_tokens_field, provider.verification_tokens)
+                    });
+                body[field] = json!(tokens);
+                body
+            }
         }
     }
 
@@ -431,6 +578,15 @@ impl RemoteProviderKind {
                 let window = entry.get("inputTokenLimit").and_then(Value::as_u64);
                 (model_id.to_owned(), label.to_owned(), window)
             }
+            Self::Anthropic => {
+                let model_id = entry.get("id").and_then(Value::as_str)?;
+                let label = entry
+                    .get("display_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(model_id);
+                let window = entry.get("max_input_tokens").and_then(Value::as_u64);
+                (model_id.to_owned(), label.to_owned(), window)
+            }
             _ => {
                 if entry.get("active").and_then(Value::as_bool) == Some(false) {
                     return None;
@@ -446,12 +602,24 @@ impl RemoteProviderKind {
                     return None;
                 }
                 let model_id = entry.get("id").and_then(Value::as_str)?.to_owned();
+                if self
+                    .openai_compatible()
+                    .and_then(|provider| provider.lists_model)
+                    .is_some_and(|lists_model| !lists_model(&model_id))
+                {
+                    return None;
+                }
                 let window = entry
                     .get("context_window")
                     .or_else(|| entry.get("context_length"))
                     .or_else(|| entry.get("info").and_then(|info| info.get("contextLength")))
                     .and_then(Value::as_u64);
-                (model_id.clone(), model_id, window)
+                let label = entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .map_or_else(|| model_id.clone(), ToOwned::to_owned);
+                (model_id, label, window)
             }
         };
         Some(AiModelListing {
@@ -498,6 +666,45 @@ impl RemoteProviderKind {
                         usage.get("candidatesTokenCount").and_then(Value::as_u64),
                     )
                 });
+                Some(event)
+            }
+            // `message_start` carries the input counter and `message_delta`
+            // the output one. Thinking and signature deltas are not text and
+            // are not forwarded.
+            Self::Anthropic => {
+                let mut event = ProviderEvent::default();
+                match value.get("type").and_then(Value::as_str)? {
+                    "message_start" => {
+                        event.input_tokens = value
+                            .get("message")
+                            .and_then(|message| message.get("usage"))
+                            .and_then(|usage| usage.get("input_tokens"))
+                            .and_then(Value::as_u64);
+                    }
+                    "content_block_delta" => {
+                        if let Some(text) = value
+                            .get("delta")
+                            .filter(|delta| {
+                                delta.get("type").and_then(Value::as_str) == Some("text_delta")
+                            })
+                            .and_then(|delta| delta.get("text"))
+                            .and_then(Value::as_str)
+                        {
+                            event.text.push_str(text);
+                        }
+                    }
+                    "message_delta" => {
+                        let usage = value.get("usage");
+                        event.input_tokens = usage
+                            .and_then(|usage| usage.get("input_tokens"))
+                            .and_then(Value::as_u64);
+                        event.output_tokens = usage
+                            .and_then(|usage| usage.get("output_tokens"))
+                            .and_then(Value::as_u64);
+                    }
+                    "message_stop" => event.finished = true,
+                    _ => {}
+                }
                 Some(event)
             }
             _ => {
@@ -637,7 +844,10 @@ fn fraction(millis: Option<u16>) -> Option<f32> {
 /// Partial usage is no usage: a provider that reports only one counter has not
 /// reported a total, and completing it with a zero would invent a number the
 /// application would then price.
-fn bounded_usage(input_tokens: Option<u64>, output_tokens: Option<u64>) -> Option<AiUsage> {
+pub(crate) fn bounded_usage(
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> Option<AiUsage> {
     let usage = AiUsage {
         input_tokens: input_tokens?,
         output_tokens: output_tokens?,

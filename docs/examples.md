@@ -326,7 +326,7 @@ An unregistered provider id is not a start error. It produces a synchronous `una
 
 ### Reach a remote provider
 
-Seven descriptors ship: Gemini, Groq, DeepSeek, Moonshot, Z.ai, DashScope and AI/ML API. The same two ports as in TypeScript, and the same ordering guarantee — the authority is consulted, then the credential resolves, and only then is a socket opened.
+Ten descriptors ship: Gemini, Groq, DeepSeek, Moonshot, Z.ai, DashScope, AI/ML API, Anthropic, OpenAI and OpenRouter. Anthropic speaks its own Messages dialect; OpenAI and OpenRouter are rows of the shared chat-completions path. The same two ports as in TypeScript, and the same ordering guarantee — the authority is consulted, then the credential resolves, and only then is a socket opened.
 
 ```rust
 use std::sync::Arc;

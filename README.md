@@ -8,7 +8,7 @@ The SDK owns completion execution, and — in the Rust crates only — speech-to
 
 **Phases 0 through 5 complete. Phase 6 has not begun and is not authorized.**
 
-Two version numbers, no longer one. Spec version 0.2.0 — the contract, and what both npm packages carry. Crate version 0.3.0 — the Rust workspace, moved by the transcription work, which serialized nothing and so left the contract where it was ([ADR 0006](docs/decisions/0006-transcription.md), amending ADR 0005's one-number rule). Four units exist:
+Two version numbers, no longer one. Spec version 0.2.0 — the contract, and what both npm packages carry. Crate version 0.4.0 — the Rust workspace, moved by the transcription work and then by the Anthropic, OpenAI and OpenRouter descriptors, neither of which serialized anything, so the contract stayed where it was ([ADR 0006](docs/decisions/0006-transcription.md), amending ADR 0005's one-number rule). Four units exist:
 
 | Unit | What it is |
 | --- | --- |

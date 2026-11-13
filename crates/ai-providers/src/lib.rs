@@ -85,9 +85,10 @@ pub use ollama::{OLLAMA_PROVIDER_ID, OllamaProvider, OllamaSetupError};
 
 #[cfg(feature = "remote")]
 pub use remote::{
-    AIMLAPI_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID, GEMINI_PROVIDER_ID,
-    GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, RemoteAiProvider, RemoteAiSetupError,
-    RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
+    AIMLAPI_PROVIDER_ID, ANTHROPIC_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID,
+    GEMINI_PROVIDER_ID, GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, OPENAI_PROVIDER_ID,
+    OPENROUTER_PROVIDER_ID, RemoteAiProvider, RemoteAiSetupError, RemoteProviderKind,
+    ZAI_PROVIDER_ID, transcription_models,
 };
 #[cfg(feature = "remote")]
 pub use transcription::{

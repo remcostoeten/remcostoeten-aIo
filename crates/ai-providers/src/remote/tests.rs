@@ -9,8 +9,9 @@ use ai_core::{
 use reqwest::Url;
 
 use super::{
-    GEMINI_PROVIDER_ID, GROQ_PROVIDER_ID, MAX_STREAM_EVENT_BYTES, RemoteAiProvider,
-    RemoteAiSetupError, RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
+    ANTHROPIC_PROVIDER_ID, GEMINI_PROVIDER_ID, GROQ_PROVIDER_ID, MAX_STREAM_EVENT_BYTES,
+    OPENAI_PROVIDER_ID, OPENROUTER_PROVIDER_ID, RemoteAiProvider, RemoteAiSetupError,
+    RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
 };
 use crate::{
     authority::AiModelAuthority,
@@ -25,6 +26,9 @@ const USER_AGENT: &str = "ai-sdk-tests/0.1";
 const GEMINI_MODEL: &str = "gemini-3.7-flash";
 const GROQ_MODEL: &str = "openai/gpt-oss-20b";
 const DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
+const ANTHROPIC_MODEL: &str = "claude-opus-5-5";
+const OPENAI_MODEL: &str = "gpt-5";
+const OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-5.5";
 const UNVISITED_WINDOW: Duration = Duration::from_millis(300);
 
 struct StoredKey;
@@ -55,6 +59,9 @@ impl AiModelAuthority for TestModels {
                 | (GROQ_PROVIDER_ID, GROQ_MODEL)
                 | ("deepseek", DEEPSEEK_MODEL)
                 | (ZAI_PROVIDER_ID, "glm-4")
+                | (ANTHROPIC_PROVIDER_ID, ANTHROPIC_MODEL)
+                | (OPENAI_PROVIDER_ID, OPENAI_MODEL)
+                | (OPENROUTER_PROVIDER_ID, OPENROUTER_MODEL)
         )
     }
 }
@@ -279,6 +286,131 @@ fn streams_gemini_deltas_and_reports_usage() {
     );
     assert!(captured.contains("x-goog-api-key"));
     assert!(!captured.contains("authorization: Bearer"));
+}
+
+/// Anthropic names its events, reports its two usage counters in different
+/// frames, and streams reasoning beside the answer. Only the answer is text.
+#[test]
+fn streams_anthropic_text_and_joins_usage_across_frames() {
+    let body = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":1}}}\n\n",
+        "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hm\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"blue\"}}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"late\"}}\n\n"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("text/event-stream", body));
+    let provider = build_provider(RemoteProviderKind::Anthropic, &base, Arc::new(StoredKey));
+    let mut sink = RecordingSink::default();
+    let mut request = request(ANTHROPIC_PROVIDER_ID, ANTHROPIC_MODEL);
+    request.parameters.temperature_millis = Some(300);
+
+    let terminal = provider.complete(&request, &AiCancellation::new(), &mut sink);
+
+    assert_eq!(
+        terminal,
+        AiCompletionTerminal::Done {
+            usage: Some(AiUsage {
+                input_tokens: 9,
+                output_tokens: 3,
+            }),
+        }
+    );
+    assert_eq!(
+        sink.deltas.len(),
+        1,
+        "reasoning and late text are not forwarded"
+    );
+    assert_eq!(sink.deltas[0].text, "blue");
+    let captured = server.join().expect("server");
+    assert!(captured.contains("POST /v1/messages"));
+    assert!(captured.contains("x-api-key"));
+    assert!(captured.contains("anthropic-version: 2023-06-01"));
+    assert!(!captured.contains("authorization: Bearer"));
+    assert!(captured.contains("\"system\":\"Be concise.\""));
+    assert!(captured.contains("\"max_tokens\":16000"));
+    assert!(
+        !captured.contains("temperature"),
+        "current Claude models reject sampling parameters"
+    );
+}
+
+#[test]
+fn an_anthropic_error_frame_fails_the_stream_visibly() {
+    let body = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9}}}\n\n",
+        "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("text/event-stream", body));
+    let provider = build_provider(RemoteProviderKind::Anthropic, &base, Arc::new(StoredKey));
+    let mut sink = RecordingSink::default();
+
+    let error = provider_error(provider.complete(
+        &request(ANTHROPIC_PROVIDER_ID, ANTHROPIC_MODEL),
+        &AiCancellation::new(),
+        &mut sink,
+    ));
+
+    assert_eq!(error.category, AiProviderErrorCategory::MalformedResponse);
+    server.join().expect("server");
+}
+
+/// OpenAI's reasoning models reject a non-default temperature and the old
+/// name of the output ceiling, and the row cannot tell which model it has.
+#[test]
+fn openai_omits_sampling_and_names_the_ceiling_its_newer_models_accept() {
+    let mut request = request(OPENAI_PROVIDER_ID, OPENAI_MODEL);
+    request.parameters.temperature_millis = Some(300);
+    request.parameters.top_p_millis = Some(900);
+
+    let openai = RemoteProviderKind::OpenAi.completion_body(&request, true);
+    let openrouter = RemoteProviderKind::OpenRouter.completion_body(&request, true);
+    let verification = RemoteProviderKind::OpenAi.verification_body(OPENAI_MODEL);
+
+    assert!(openai.get("temperature").is_none());
+    assert!(openai.get("top_p").is_none());
+    assert_eq!(
+        openai["stream_options"]["include_usage"],
+        serde_json::json!(true)
+    );
+    assert!(openrouter.get("temperature").is_some());
+    assert!(openrouter.get("stream_options").is_none());
+    assert_eq!(verification["max_completion_tokens"], serde_json::json!(16));
+    assert!(verification.get("max_tokens").is_none());
+    assert_eq!(
+        RemoteProviderKind::Groq.verification_body("m")["max_tokens"],
+        serde_json::json!(1)
+    );
+}
+
+#[test]
+fn streams_openrouter_through_the_shared_path() {
+    let body = concat!(
+        ": OPENROUTER PROCESSING\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"blue\"},\"finish_reason\":null}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("text/event-stream", body));
+    let provider = build_provider(RemoteProviderKind::OpenRouter, &base, Arc::new(StoredKey));
+    let mut sink = RecordingSink::default();
+
+    let terminal = provider.complete(
+        &request(OPENROUTER_PROVIDER_ID, OPENROUTER_MODEL),
+        &AiCancellation::new(),
+        &mut sink,
+    );
+
+    assert_eq!(terminal, AiCompletionTerminal::Done { usage: None });
+    assert_eq!(sink.deltas.len(), 1);
+    let captured = server.join().expect("server");
+    assert!(captured.contains("POST /api/v1/chat/completions"));
+    assert!(captured.contains("authorization: Bearer"));
 }
 
 #[test]
@@ -849,6 +981,69 @@ fn lists_openai_style_models_and_skips_inactive_or_non_chat_entries() {
     let captured = server.join().expect("server");
     assert!(captured.contains("GET /openai/v1/models"));
     assert!(captured.contains("authorization: Bearer"));
+}
+
+#[test]
+fn lists_anthropic_models_with_their_display_names() {
+    let body = concat!(
+        "{\"data\":[",
+        "{\"type\":\"model\",\"id\":\"claude-opus-5-5\",\"display_name\":\"Claude Opus 5.5\",",
+        "\"max_input_tokens\":1000000,\"max_tokens\":128000}",
+        "],\"has_more\":false}"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("application/json", body));
+    let provider = build_provider(RemoteProviderKind::Anthropic, &base, Arc::new(StoredKey));
+
+    let listings = provider.list_models().expect("listing");
+
+    assert_eq!(listings.len(), 1);
+    assert_eq!(listings[0].model_id, "claude-opus-5-5");
+    assert_eq!(listings[0].label, "Claude Opus 5.5");
+    assert_eq!(listings[0].context_window_tokens, Some(1_000_000));
+    let captured = server.join().expect("server");
+    assert!(captured.contains("GET /v1/models?limit=1000"));
+    assert!(captured.contains("x-api-key"));
+    assert!(captured.contains("anthropic-version: 2023-06-01"));
+}
+
+#[test]
+fn lists_only_openai_chat_models_and_labels_openrouter_models_by_name() {
+    let body = concat!(
+        "{\"object\":\"list\",\"data\":[",
+        "{\"id\":\"gpt-5\"},{\"id\":\"o4-mini\"},{\"id\":\"gpt-4o-audio-preview\"},",
+        "{\"id\":\"text-embedding-3-large\"},{\"id\":\"whisper-1\"},{\"id\":\"dall-e-3\"}",
+        "]}"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("application/json", body));
+    let provider = build_provider(RemoteProviderKind::OpenAi, &base, Arc::new(StoredKey));
+
+    let listings = provider.list_models().expect("listing");
+
+    assert_eq!(
+        listings
+            .iter()
+            .map(|listing| listing.model_id.as_str())
+            .collect::<Vec<_>>(),
+        ["gpt-5", "o4-mini"]
+    );
+    server.join().expect("server");
+
+    let body = concat!(
+        "{\"data\":[{\"id\":\"anthropic/claude-sonnet-5.5\",",
+        "\"name\":\"Anthropic: Claude Sonnet 5.5\",\"context_length\":1000000}]}"
+    )
+    .to_owned();
+    let (base, server) = fixtures::serve(fixtures::ok("application/json", body));
+    let provider = build_provider(RemoteProviderKind::OpenRouter, &base, Arc::new(StoredKey));
+
+    let listings = provider.list_models().expect("listing");
+
+    assert_eq!(listings[0].label, "Anthropic: Claude Sonnet 5.5");
+    assert_eq!(listings[0].context_window_tokens, Some(1_000_000));
+    let captured = server.join().expect("server");
+    assert!(captured.contains("GET /api/v1/models"));
 }
 
 /// A descriptor with no listing endpoint refuses without a request. That is a

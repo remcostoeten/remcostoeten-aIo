@@ -32,11 +32,11 @@ use crate::{
 };
 
 pub use descriptor::{
-    AIMLAPI_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID, GEMINI_PROVIDER_ID,
-    GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, RemoteProviderKind, ZAI_PROVIDER_ID,
-    transcription_models,
+    AIMLAPI_PROVIDER_ID, ANTHROPIC_PROVIDER_ID, DASHSCOPE_PROVIDER_ID, DEEPSEEK_PROVIDER_ID,
+    GEMINI_PROVIDER_ID, GROQ_PROVIDER_ID, MOONSHOT_PROVIDER_ID, OPENAI_PROVIDER_ID,
+    OPENROUTER_PROVIDER_ID, RemoteProviderKind, ZAI_PROVIDER_ID, transcription_models,
 };
-use descriptor::{ProviderEvent, TranscriptionBody};
+use descriptor::{ProviderEvent, TranscriptionBody, bounded_usage};
 
 const MAX_STREAM_EVENT_BYTES: u64 = 64 * 1024;
 const MAX_DISCARDED_RESPONSE_BYTES: u64 = 256 * 1024;
@@ -409,6 +409,8 @@ impl RemoteAiProvider {
         let mut sequence = 0u32;
         let mut response_bytes = 0usize;
         let mut usage: Option<AiUsage> = None;
+        let mut input_tokens: Option<u64> = None;
+        let mut output_tokens: Option<u64> = None;
         let mut saw_event = false;
 
         loop {
@@ -470,6 +472,11 @@ impl RemoteAiProvider {
             saw_event = true;
             if event.usage.is_some() {
                 usage = event.usage.clone();
+            }
+            if event.input_tokens.is_some() || event.output_tokens.is_some() {
+                input_tokens = event.input_tokens.or(input_tokens);
+                output_tokens = event.output_tokens.or(output_tokens);
+                usage = bounded_usage(input_tokens, output_tokens);
             }
             if !event.text.is_empty() {
                 match self.forward(request, &event, sequence, &mut response_bytes, sink) {
